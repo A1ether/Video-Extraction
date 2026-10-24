@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vextract · 自媒体视频提取</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">vx</span>
+    <div>
+      <h1>vextract</h1>
+      <p class="sub">分享链接 → 无水印视频 + 元数据</p>
+    </div>
+  </div>
+  <div class="status">
+    <span id="engine-pill" class="pill pill-muted" title="引擎与依赖状态">检查中…</span>
+    <span id="sse-pill" class="pill pill-muted" title="实时推送连接">未连接</span>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab is-active" data-tab="extract" role="tab">提取</button>
+  <button class="tab" data-tab="tasks" role="tab">任务 <span id="tab-badge" class="badge hidden">0</span></button>
+  <button class="tab" data-tab="platforms" role="tab">平台</button>
+  <button class="tab" data-tab="settings" role="tab">设置</button>
+</nav>
+
+<main>
+  <!-- ============ 提取 ============ -->
+  <section id="panel-extract" class="panel is-active">
+    <div class="card">
+      <label class="field-label" for="share-text">粘贴分享文本或链接</label>
+      <textarea id="share-text" rows="3" placeholder="例：7.92 复制打开抖音，看看【…】https://v.douyin.com/xxxx/ 复制此链接"></textarea>
+      <div class="row wrap gap8">
+        <button id="btn-paste" class="btn ghost" type="button">从剪贴板粘贴</button>
+        <span id="detected" class="chip hidden"></span>
+        <span class="spacer"></span>
+        <button id="btn-extract" class="btn primary" type="button">解析</button>
+      </div>
+      <div class="row wrap gap6 samples">
+        <span class="muted">试试：</span>
+        <button class="sample" data-url="https://www.bilibili.com/video/BV1GJ411x7h7/">B站</button>
+        <button class="sample" data-url="https://m.weibo.cn/detail/4189191225395228">微博</button>
+        <button class="sample" data-url="https://www.kuaishou.com/short-video/3xwzr5dveyqc5fa">快手</button>
+      </div>
+    </div>
+
+    <div id="extract-error" class="card error hidden" role="alert"></div>
+    <div id="extract-result" class="hidden"></div>
+  </section>
+
+  <!-- ============ 任务 ============ -->
+  <section id="panel-tasks" class="panel">
+    <div class="row gap8 toolbar">
+      <span id="tasks-summary" class="muted">暂无任务</span>
+      <span class="spacer"></span>
+      <button id="btn-refresh" class="btn ghost" type="button">刷新</button>
+      <button id="btn-clear-finished" class="btn ghost" type="button">清空已完成</button>
+    </div>
+    <div id="tasks-list" class="tasks"></div>
+  </section>
+
+  <!-- ============ 平台 ============ -->
+  <section id="panel-platforms" class="panel">
+    <div class="card">
+      <h2>平台能力（含本机实测状态）</h2>
+      <div id="platforms-table" class="table-wrap"></div>
+    </div>
+    <div class="card">
+      <h2>环境自检</h2>
+      <div id="doctor-grid" class="grid"></div>
+    </div>
+  </section>
+
+  <!-- ============ 设置 ============ -->
+  <section id="panel-settings" class="panel">
+    <div class="card">
+      <h2>下载位置</h2>
+      <div class="row gap8">
+        <input id="set-out-dir" type="text" spellcheck="false" placeholder="/Users/you/Downloads">
+        <button id="btn-save-settings" class="btn primary" type="button">保存</button>
+      </div>
+      <p class="hint">下载的文件会保存到这里；前端设置会写入 <code id="set-home"></code>。</p>
+    </div>
+
+    <div class="card">
+      <h2>Cookie（抖音必需 / 小红书高码率需要）</h2>
+      <div class="row gap8">
+        <label class="field-label" for="set-browser">从浏览器读取 cookie</label>
+        <select id="set-browser"></select>
+      </div>
+      <p class="hint">选一个浏览器后，抖音与小红书会直接复用该浏览器的登录态（只读取，不修改）。也可以把 Netscape 格式的 cookie 文件放到下面这些路径：</p>
+      <div id="cookie-list" class="grid"></div>
+    </div>
+
+    <div class="card">
+      <h2>进度推送</h2>
+      <label class="row gap8" style="cursor:pointer">
+        <input id="set-realtime" type="checkbox" style="width:auto">
+        <span>使用实时推送（SSE）</span>
+      </label>
+      <p class="hint">默认开启，进度是推送过来的；若你所在网络/代理会打断长连接（表现为进度不走、状态卡住），关掉它即改为每 3 秒轮询。
+        也可以在地址上加 <code>?live=0</code> 临时关掉（脚本化场景有用）。</p>
+    </div>
+
+    <div class="card">
+      <h2>怎么用</h2>
+      <ol class="hint list">
+        <li>把分享链接贴进「提取」，点<b>解析</b>，确认标题/作者/码流没错。</li>
+        <li>选清晰度（默认最高），可改文件名与输出目录，点<b>下载</b>。</li>
+        <li>在「任务」里看实时进度；B站/YouTube 会有「合并」阶段（ffmpeg 无损合并音视频）。</li>
+        <li>完成后可直接在页面里播放、下载文件或在访达中定位。</li>
+      </ol>
+    </div>
+  </section>
+</main>
+
+<div id="toasts" class="toasts"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

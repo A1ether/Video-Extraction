@@ -1,0 +1,128 @@
+{
+ "platform_coverage": [
+  {
+   "platform": "douyin",
+   "supported": "部分：仅 /video/<数字id> 直链可命中，实测在当前版本必须带 cookie 才能取到数据（本次实测失败）",
+   "extractor_class": "DouyinIE (继承 TikTokBaseIE)",
+   "path": "yt_dlp/extractor/tiktok.py:1371（_VALID_URL 见 :1372，仅 https?://(?:www\\.)?douyin\\.com/video/(?P<id>[0-9]+)）",
+   "evidence": "实测（yt-dlp 2026.10.21）：`yt-dlp --simulate https://www.douyin.com/video/6961737553342991651` 输出 `[Douyin] ...: Downloading web detail JSON` 后 `ERROR: [Douyin] ...: Fresh cookies (not necessarily logged in) are needed`，exit=1。代码对应 :1500-1505 的 `raise ExtractorError('Fresh cookies (not necessarily logged in) are needed', expected=not self._get_cookies('https://www.douyin.com/').get('s_v_web_id'))`，上方注释为 `# TODO: Run verification challenge code to generate signature cookies`。suitable('https://v.douyin.com/iRNBho6u/') 返回 ['Generic']，短链不被 DouyinIE 匹配。"
+  },
+  {
+   "platform": "tiktok",
+   "supported": "支持：主站视频/用户/直播解析可用，但 collection/effect/sound/tag 四个子入口在 --list-extractors 中标注 CURRENTLY BROKEN",
+   "extractor_class": "TikTokIE / TikTokVMIE / TikTokUserIE / TikTokLiveIE / TikTokSoundIE / TikTokEffectIE / TikTokTagIE / TikTokCollectionIE",
+   "path": "yt_dlp/extractor/tiktok.py:708 (TikTokIE)、:1511 (TikTokVMIE)、:1018 (TikTokUserIE)、:1574 (TikTokLiveIE)、:1241/:1265/:1285/:1313",
+   "evidence": "`yt-dlp --list-extractors` 实际输出：`TikTok`、`tiktok:collection`、`tiktok:effect (CURRENTLY BROKEN)`、`tiktok:live`、`tiktok:sound (CURRENTLY BROKEN)`、`tiktok:tag (CURRENTLY BROKEN)`、`tiktok:user`、`vm.tiktok`。_extractors.py:1970-1979 显式导出这些类。请求侧依赖浏览器指纹模拟：tiktok.py:281 `_download_webpage(..., impersonate=True)`、:287 读取响应头 `impersonate` 扩展，需要 curl_cffi 才有完整能力（提交 2026-08-19 `[ie/tiktok] Re-implement impersonation support (#17480)`）。"
+  },
+  {
+   "platform": "bilibili",
+   "supported": "支持且最完整（20+ 个 extractor，覆盖视频/番剧/课程/空间/收藏夹/音频/搜索）；1080P 高码率与 4K/HDR 需登录大会员",
+   "extractor_class": "BiliBiliIE / BiliBiliBangumiIE / BilibiliCheeseIE / BilibiliSpaceVideoIE / BilibiliPlaylistIE / BiliBiliSearchIE 等",
+   "path": "yt_dlp/extractor/bilibili.py:371 (BiliBiliIE，_VALID_URL :372)；wbi 签名 :134 _get_wbi_key / :159 _sign_wbi（:166 计算 w_rid=md5(query+key)）；_HEADERS :50 {'Referer': 'https://www.bilibili.com/'}",
+   "evidence": "实测 `yt-dlp --simulate --no-playlist https://www.bilibili.com/video/BV1GJ411x7h7` 成功：日志 `Downloading wbi sign` → `Downloading video formats for cid 137649199` → `Format(s) 1080P 高码率 are missing; you have to become a premium member ...` → `Downloading 1 format(s): 100026+30280`（DASH 音视频分离，落盘需 ffmpeg 合并）。_extractors.py:192-211 导入 BiliBiliDynamicIE 等 20 个类。"
+  },
+  {
+   "platform": "kuaishou",
+   "supported": "不支持：仓库内无任何 extractor，URL 落到 GenericIE 后报 Unsupported URL",
+   "extractor_class": "无",
+   "path": "无文件；yt_dlp/extractor/_extractors.py 中 grep -i kuaishou 命中 0；`yt-dlp --list-extractors | grep -ci kuaishou` = 0",
+   "evidence": "实测 `yt-dlp --ignore-errors --simulate https://kuaishou.com/short-video/xxx`：`[generic] ... [redirect] Following redirect to https://www.kuaishou.com/short-video/xxx` 后 `ERROR: Unsupported URL`，exit=1。官方仅有一条需求 issue：yt-dlp#14010 `add support for kuaishou.com`（2025-08-12 创建，仍 open）。"
+  },
+  {
+   "platform": "xiaohongshu/rednote",
+   "supported": "名义支持实际不可用：提取器 2025-01-20 后未再更新，实测 0 个 format；不认 rednote.com 新域名，也不认 xhslink.com 短链",
+   "extractor_class": "XiaoHongShuIE",
+   "path": "yt_dlp/extractor/xiaohongshu.py:13（_VALID_URL :14，仅 www.xiaohongshu.com/(explore|discovery/item)/）",
+   "evidence": "实测 `yt-dlp --simulate https://www.xiaohongshu.com/explore/6411cf99000000001300b6d9` → `ERROR: [XiaoHongShu] ...: No video formats found!`，exit=1。该文件最后一次提交为 2025-01-20 `[ie/XiaoHongShu] Extract more formats (#12147)`。suitable() 实测：`https://www.rednote.com/explore/...` → ['Generic']，`https://xhslink.com/a/abc123` → ['Generic']。相关 open issues：#15572（最高画质下载失效）、#13578（Unable to extract initial state）、#16519（站点已迁移到 Rednote.com）、#10814（No video formats found）。提取逻辑依赖 `window.__INITIAL_STATE__`（:48），部分笔记需 URL 带 `xsec_token`（见 :26 测试用例）。"
+  },
+  {
+   "platform": "weibo",
+   "supported": "支持：单条微博/视频/用户主页；内置访客 cookie 引导，一般无需用户 cookie",
+   "extractor_class": "WeiboIE / WeiboVideoIE / WeiboUserIE",
+   "path": "yt_dlp/extractor/weibo.py:133 (WeiboIE)、:212 (WeiboVideoIE)、:294 (WeiboUserIE)；访客 cookie 逻辑 :24 `_update_visitor_cookies`",
+   "evidence": "_extractors.py:2270-2273 导出三个类；suitable() 实测 `https://m.weibo.cn/detail/...` 与 `https://weibo.com/1234567890/Nabcdefg` 均命中 ['Weibo']。weibo.py:56-64 先用 `Referer: https://weibo.com/` 请求，遇跳转则调用 `_update_visitor_cookies`（请求 genvisitor 接口拿 guest cookie）后重试。open issues 仅 1 条。"
+  },
+  {
+   "platform": "weixin/视频号",
+   "supported": "不支持：无 extractor，channels.weixin.qq.com 链接只能走 GenericIE 并报 Unsupported URL",
+   "extractor_class": "无",
+   "path": "无文件；grep -inE 'weixin|wechat|channels' yt_dlp/extractor/_extractors.py 无相关命中；`--list-extractors | grep -iE 'weixin|wechat'` = 0",
+   "evidence": "实测 `yt-dlp --simulate https://channels.weixin.qq.com/xyz` → `[generic] xyz: Downloading webpage` → `ERROR: Unsupported URL: https://channels.weixin.qq.com/xyz`，exit=1。code search（gh api search/code?q=weixin repo:yt-dlp/yt-dlp）total_count=0。"
+  },
+  {
+   "platform": "youtube",
+   "supported": "支持，但依赖最重：需要 yt-dlp-ejs + 一个 JS 运行时（deno/node/bun/quickjs）解 n-sig，部分内容还需 PO Token",
+   "extractor_class": "YoutubeIE（YoutubeBaseInfoExtractor 派生）",
+   "path": "yt_dlp/extractor/youtube/_video.py:84（_VALID_URL :86）；JS Challenge 框架 yt_dlp/extractor/youtube/jsc/（_builtin/deno.py、node.py、bun.py、quickjs.py、ejs.py）；PO Token 框架 yt_dlp/extractor/youtube/pot/",
+   "evidence": "实测 `yt-dlp --simulate https://www.youtube.com/watch?v=dQw4w9WgXcQ` 成功（本机装有 /opt/homebrew/bin/node 与 bun）：`Downloading visionos player API JSON` → `Downloading 1 format(s): 401+251`。jsc/README.md 明确该框架用于「solving n/sig JS Challenges programmatically」，公开 API 仅 yt_dlp.extractor.youtube.jsc.provider，其余 internal-only。_TESTS 中多处 `'skip': 'PO Token Required'`（_video.py:1413、:1525）。"
+  }
+ ],
+ "plugin_mechanism": "yt-dlp 的扩展机制是 PEP 420 隐式命名空间包（namespace package），不是 setuptools entry_points——实测 `grep -rn entry_points` 在整个已安装 yt_dlp 包内 0 命中，官方 sample 仓库（github.com/yt-dlp/yt-dlp-sample-plugins）的 setup.cfg 也只有 `packages = find_namespace:`。\n\n【目录结构（当前版本实测可用）】\n~/yt-dlp-plugins/<pkg_name>/yt_dlp_plugins/extractor/<module>.py\n~/yt-dlp-plugins/<pkg_name>/yt_dlp_plugins/postprocessor/<module>.py\n即包根固定名 `yt_dlp_plugins`，其下只有两个合法子包：`extractor`（后缀 IE）与 `postprocessor`（后缀 PP）。\n\n【搜索路径】README「Installing Plugins」列出：${XDG_CONFIG_HOME}/yt-dlp/plugins/<pkg>/yt_dlp_plugins/（Linux/macOS 推荐）、${XDG_CONFIG_HOME}/yt-dlp-plugins/<pkg>/yt_dlp_plugins/、${APPDATA}/yt-dlp/plugins/...（Windows）、~/.yt-dlp/plugins/<pkg>/yt_dlp_plugins、~/yt-dlp-plugins/<pkg>/yt_dlp_plugins、/etc/yt-dlp/plugins/、/etc/yt-dlp-plugins/、可执行文件同级的 yt-dlp-plugins/、PYTHONPATH 中任意含 yt_dlp_plugins 的路径，以及 .zip/.egg/.whl（zip 根含 yt_dlp_plugins/）。pip 安装的插件包同样生效，但「不同 pip 插件包之间文件名必须唯一」。\n\n【命名/导入规则（README :2054 与源码 plugins.py 一致）】\n1) 模块内所有不以 `_` 开头、名字以 IE/PP 结尾的公开类会被注册；遵循 `__all__`；\n2) 以 `_` 开头的模块或类被视为私有、跳过（实测：把文件命名为 `_ovr.py` 时插件完全不加载，改名 `ovr.py` 后立即生效）；\n3) 不要用相对 import（sample 注释 `# ⚠ Don't use relative imports`），应从 `yt_dlp.extractor.common` 导入 InfoExtractor；\n4) 环境变量 `YTDLP_NO_PLUGINS` 非空则完全禁用插件；\n5) 所有插件在启动时**全部被 import**，README 明确「there are no checks performed on plugin code，use plugins at your own risk」——即无沙箱，第三方插件等同于任意代码执行；\n6) 提取器插件优先级高于内置提取器，无需 CLI 开关；后处理器插件需 `--use-postprocessor NAME` 显式调用。\n\n【覆盖（override）内置提取器（实测）】\nclass MyXhsIE(XiaoHongShuIE, plugin_name='hermesxhs') —— 通过 `InfoExtractor.__init_subclass__(cls, *, plugin_name=None, ...)`（yt_dlp/extractor/common.py:4122-4133）注册到 plugin_ies_overrides，IE_NAME 变为 `XiaoHongShu+hermesxhs`。实测 `yt-dlp --plugin-dirs /tmp/pd -v ...` 输出 `[debug] Extractor Plugins: HermesDemoIE, hermesxhs (XiaoHongShuIE)` 与 `[XiaoHongShu+hermesxhs] Extracting URL: ...`，确认替换生效。\n\n【--plugin-dirs 语义（实测踩坑，务必记住）】\nDIR 是「插件包的父目录」，扫描逻辑为 plugins.py:120 `candidate_plugin_paths()` → `Path(candidate).iterdir()`，再拼 `yt_dlp_plugins`。即 `--plugin-dirs /tmp/pd` 会加载 `/tmp/pd/*/yt_dlp_plugins`；直接传插件包自身路径（/tmp/pd/ovr）不会生效。\n\n【最小示例结构】\nmyplugin/\n├── pyproject.toml            # [build-system] setuptools; 无需 entry_points\n├── setup.cfg                 # [options] packages = find_namespace:\n└── yt_dlp_plugins/\n    └── extractor/\n        └── mysite.py\nmysite.py 内容：\nfrom yt_dlp.extractor.common import InfoExtractor\n\nclass MySiteIE(InfoExtractor):\n    _VALID_URL = r'https?://(?:www\\.)?mysite\\.com/v/(?P<id>\\w+)'\n    def _real_extract(self, url):\n        vid = self._match_id(url)\n        return {'id': vid, 'title': '...', 'formats': [{'url': '...', 'ext': 'mp4'}]}\n\n【官方文档】\n- README「PLUGINS / Developing Plugins」：https://github.com/yt-dlp/yt-dlp#plugins （对应仓库 README.md:1992-2058）\n- 插件开发指南 wiki：https://github.com/yt-dlp/yt-dlp/wiki/Plugin-Development （HTTP 200 实测可访问）\n- 已知插件清单：https://github.com/yt-dlp/yt-dlp/wiki/Plugins\n- 模板仓库：https://github.com/yt-dlp/yt-dlp-sample-plugins （目录实测：yt_dlp_plugins/extractor/sample.py、sample_override.py、postprocessor/sample.py）\n- 发现性约定：仓库打 `yt-dlp-plugins` topic；JS Challenge Provider 插件打 `yt-dlp-jsc-provider` topic（jsc/README.md）",
+ "reuse_verdict": "结论：引擎层只选 yt-dlp，metube 不可作为引擎复用（只可作部署形态参考），streamlink 对本项目不适用。\n\n1) yt-dlp = 唯一引擎，方式为**同进程 Python 库调用**（`from yt_dlp import YoutubeDL`），不是 subprocess。理由是可拿到结构化 dict（`extract_info(url, download=False)` + `ydl.sanitize_info()`）与进度回调，避免解析 stdout（README「EMBEDDING YT-DLP」:2062 明确 stdout 不可依赖）。\n2) 覆盖缺口用**自研 yt-dlp 插件包**补齐，而不是 fork：douyin cookie/签名、kuaishou（零覆盖）、weixin 视频号（零覆盖）、xiaohongshu（陈旧+域名漂移）四项全部可作为一个 `yt_dlp_plugins/extractor/*.py` 插件包发布；需要修内置行为时用 `plugin_name=` 继承覆盖（已实测 `[XiaoHongShu+hermesxhs]` 生效）。这条路线的额外好处：上游修复（尤其 bilibili/youtube）自动继承，不必维护 fork。\n3) 版本策略必须跟 nightly（`pip install -U --pre yt-dlp` 或 pyproject 里锁 nightly 快照 + 周更），因为 README :167 自述 stable「is often \"stale\" and prone to external breakage」，而 update.py:195 只保证「至少每 90 天一次 stable 发布」。锁定纯 stable 会让我们在站点改版窗口期（实测 douyin/xhs 就是活例）长期不可用。\n4) 短链必须在引擎外用 HTTP HEAD/GET 解 302 再喂给 yt-dlp：实测 `v.douyin.com`、`b23.tv`、`xhslink.com` 的 `suitable()` 只返回 Generic（v.douyin.com 甚至不会被 redirect 到可识别路径就直接 404/Unsupported），GenericIE 的 redirect 只在 generic.py:572 处对可跟随的 3xx 生效。这是分享链接入口的必备前置步骤。\n5) cookie 是产品级硬需求，不是可选项：douyin（s_v_web_id/ttwid，实测无 cookie 直接失败）、bilibili（SESSDATA 才解锁 1080P+/字幕）、youtube（PO Token/登录内容）。架构上要预留 cookie 注入通道（`cookiefile` 参数、`--cookies-from-browser` 等价物），并接受「部分平台在无登录态下不可用」的产品事实。\n6) 许可证层面可自由 vendor：yt-dlp 为 Unlicense，README :149 明确「git 仓库、PyPI sdist、PyPI wheel 只包含 Unlicense 代码」，闭源分发/内嵌无 copyleft 义务；唯一要注意的是**不要用 PyInstaller 官方二进制**（README :145 说明其捆绑 GPLv3+ 代码，整体按 GPLv3+ 分发），并且 ffmpeg 是独立进程、许可证「取决于构建」（README :205），需自行选择 LGPL 构建以规避 GPL。\n   对比：metube 是 AGPL-3.0，若把它作为网络服务暴露给用户且做了修改，AGPL §13 要求向网络交互用户提供对应源码——对我们「闭源 SaaS」的目标是明确风险，因此只借鉴其架构（aiohttp + 进程内 YoutubeDL + multiprocessing 隔离下载 + 每日自动升级 yt-dlp 的 CI），不复制其代码。streamlink 是 BSD-2-Clause（商用无障碍），但它是**直播专用**：src/streamlink/plugins/youtube.py 头部 docstring 自述 `$notes VOD content and protected videos are not supported`，douyin/tiktok 插件均标 `$type live`，且没有任何 kuaishou/xiaohongshu/weibo 插件——与本项目「下载无水印成片」的核心诉求不重叠，仅在「直播间录制」作为二期功能时可作为补充依赖（BSD-2 可安全引入）。\n7) 现实预期管理：yt-dlp 不是稳定 API，站点侧随时会断。douyin 需 cookie 且上游自己有 TODO 未解签名；xiaohongshu 提取器已 21 个月未动、实测 0 格式；kuaishou/视频号 完全空白；tiktok 四个子入口标 BROKEN。产品上必须把「平台可用性」做成可观测指标（每次抓取记录 extractor + 版本 + 失败原因），并接受「先交付 bilibili/weibo/youtube + 自研 douyin 插件，kuaishou/视频号/小红书 作为自研攻坚项」的排期。",
+ "findings": [
+  {
+   "topic": "实测环境与 extractor 总量",
+   "detail": "在 /tmp/ytdlprobe 用 uv 建 3.13 venv + `uv pip install yt-dlp`，`yt-dlp --version` = 2026.10.21（PyPI 当前稳定版）。`yt-dlp --list-extractors` 输出 1755 行；`len(yt_dlp.extractor.gen_extractor_classes())` = 1754（差 1 为表头/空行）。仓库 yt_dlp/extractor/ 下 982 个路径条目，_extractors.py 2477 行。"
+  },
+  {
+   "topic": "短链匹配缺口（分享链接入口必须自解 302）",
+   "detail": "用 gen_extractor_classes() + ie.suitable(url) 实测：www.douyin.com/video/<id> → [Douyin, Generic]；v.douyin.com/iRNBho6u/ → [Generic]；www.tiktok.com/@u/video/<id> → [TikTok, Generic]；vm.tiktok.com/xxx → [TikTokVM, Generic]；www.bilibili.com/video/BV... → [BiliBili, Generic]；b23.tv/abc123 → [Generic]；www.xiaohongshu.com/explore/<id> → [XiaoHongShu, Generic]；xhslink.com/a/abc → [Generic]；www.rednote.com/explore/<id> → [Generic]。GenericIE 的跳转处理在 yt_dlp/extractor/generic.py:572（日志 [redirect] Following redirect to ...）之后重新分发，但对不返回 3xx 的短链域名无效。"
+  },
+  {
+   "topic": "Douyin cookie 依赖是一等风险",
+   "detail": "tiktok.py:1500-1505 在拿不到 aweme_detail 时抛 ExtractorError('Fresh cookies (not necessarily logged in) are needed')，判定依据是 cookie s_v_web_id；其上方 TODO 明说尚未实现 verification challenge 生成签名 cookie。实测 2026.10.21 对公开视频直接失败（exit=1）。对应 open issue #9667（2024-04-11）：即使传了 cookie 仍报 fresh cookies needed。"
+  },
+  {
+   "topic": "Bilibili 签名与清晰度门槛",
+   "detail": "bilibili.py:134 _get_wbi_key 请求 https://api.bilibili.com/x/web-interface/nav 取 wbi_img 的 img_url/sub_url；:159 _sign_wbi 生成 w_rid = md5(query + key)；:229 调用 /x/player/wbi/playurl；wbi key 有本地缓存（:53 _wbi_key_cache、:135 _WBI_KEY_CACHE_TIMEOUT）。清晰度：:68 与实测日志均提示 1080P 高码率/4K 需大会员（premium_only 判定 :1024/:1032）；字幕需登录（:267 need_login_subtitle）。请求头固定 Referer: https://www.bilibili.com/（:50）。"
+  },
+  {
+   "topic": "小红书提取器已实质停更",
+   "detail": "yt_dlp/extractor/xiaohongshu.py 最后提交 2025-01-20（[ie/XiaoHongShu] Extract more formats #12147），全文 109 行、仅一个类 XiaoHongShuIE，依赖网页 window.__INITIAL_STATE__，遍历 note.noteDetailMap[id].note.video.media.stream 取 masterUrl/backupUrls，并探测 originVideoKey 原片。实测当天返回 No video formats found!。不匹配 rednote.com（站点已改名，issue #16519）与 xhslink.com；部分笔记需 URL 带 xsec_token（:26 测试用例）。"
+  },
+  {
+   "topic": "TikTok 系入口的破损面",
+   "detail": "--list-extractors 直出 tiktok:collection、tiktok:effect (CURRENTLY BROKEN)、tiktok:sound (CURRENTLY BROKEN)、tiktok:tag (CURRENTLY BROKEN)。TikTokIE 的 _VALID_URL（tiktok.py:709）只接受 www.tiktokv?.com/(embed|share/video|@user/video)/<id>，短链 www.tiktok.com/t/xxx 与 vm/vt.tiktok.com 由 TikTokVMIE(:1511) 单独处理。请求依赖 impersonate=True（:281、:1178、:1637），即 curl_cffi 指纹模拟。"
+  },
+  {
+   "topic": "插件机制关键规则（全部实测）",
+   "detail": "命名空间包 yt_dlp_plugins.{extractor,postprocessor}；类名必须以 IE/PP 结尾且不以 _ 开头；模块名以 _ 开头会被跳过（实测 _ovr.py 不加载，改名 ovr.py 立即生效）；包内无 entry_points（grep 整个已安装包 0 命中）；README:1994 明确所有插件启动时全部 import 且不做任何检查（无沙箱）；YTDLP_NO_PLUGINS 可整体禁用；--plugin-dirs DIR 的 DIR 是插件包父目录（plugins.py:120 candidate_plugin_paths → iterdir()），传插件包自身不生效（实测踩坑）。"
+  },
+  {
+   "topic": "覆盖内置 extractor 的官方姿势（实测通过）",
+   "detail": "class MyXhsIE(XiaoHongShuIE, plugin_name='hermesxhs') 走 InfoExtractor.__init_subclass__（common.py:4122-4133），写入 plugin_ies_overrides，IE_NAME 变为 XiaoHongShu+hermesxhs。实测输出 [debug] Extractor Plugins: HermesDemoIE, hermesxhs (XiaoHongShuIE) 与 [XiaoHongShu+hermesxhs] Extracting URL: ...。这是不 fork 修上游的正规入口。"
+  },
+  {
+   "topic": "库内嵌时插件默认不加载（易踩坑）",
+   "detail": "yt_dlp/plugins.py:197 判断 os.environ.get('YTDLP_NO_PLUGINS') or not plugin_dirs.value 就 return {}；而 globals.py:24 plugin_dirs = Indirect(['default']) 在纯库环境未生效（实测 gen_extractor_classes() 不含自建插件）。必须显式 plugin_dirs.value = ['default'] 后调用 yt_dlp._load_all_plugins()，插件才进全局 lookup（实测加上后 HermesDemo 出现）。另外 CLI 的 --list-extractors 在 _load_all_plugins() 之前就 return（__init__.py 约 :968），所以列表里看不到插件。"
+  },
+  {
+   "topic": "库调用 vs subprocess 的语义差异（实测）",
+   "detail": "YoutubeDL.extract_info(url, download=False) 在 ignoreerrors=False（默认）时把 ExtractorError 包装为 yt_dlp.utils.DownloadError 抛出（MRO: DownloadError → YoutubeDLError → Exception），消息带 ERROR: 前缀；ignoreerrors=True 时返回 None 不抛，但 ydl.download() 返回码变 1（_download_retcode，YoutubeDL.py:1101/:3713）。返回值不保证 JSON 可序列化，README:2080 要求过 ydl.sanitize_info(info)。实测存在的参数：no_warnings(:242)、format(:256)、outtmpl(:280)、skip_download(:333)、noplaylist(:336)、cookiefile(:354)、extractor_args(:539)、impersonate(:441)、progress_hooks、logger。"
+  },
+  {
+   "topic": "CLI 退出码与告警抑制",
+   "detail": "yt_dlp/__init__.py:1077-1089：正常 0；CookieLoadError/DownloadError/UnsafeExecExpansionError → 1；OptParseError → 2；更新器异常 → 100；DownloadCancelled（用户中断/中断剩余任务）→ 101。macOS 自带环境无 Unix timeout 命令（实测 command not found），进程级超时需自行实现。--no-warnings 对应参数 no_warnings（README:764、YoutubeDL.py:1142 处 report_warning 前判断）；另有版本超 90 天的启动告警，参数名 warn_when_outdated（YoutubeDL.py:514），文案在 update.py:203，用 --no-update 抑制。"
+  },
+  {
+   "topic": "许可证事实（决定能否闭源 vendor）",
+   "detail": "yt-dlp：LICENSE 为 Unlicense 全文。README:145 指出 PyInstaller 官方二进制捆绑 GPLv3+ 代码、整体按 GPLv3+ 分发；README:149 明确 git 仓库、PyPI sdist、PyPI wheel 只含 Unlicense 代码 → 以 pip 依赖形式内嵌闭源产品无 copyleft 义务。ffmpeg 为独立进程，License depends on the build（README:205）。yt-dlp-ejs 为 Unlicense 但捆绑 MIT(astring)/ISC(meriyah) 组件（README:213）。metube：AGPL-3.0（LICENSE 首行 GNU AFFERO GENERAL PUBLIC LICENSE Version 3），网络服务化+修改会触发 §13 源码提供义务。streamlink：BSD-2-Clause（LICENSE 首行 Copyright (c) 2011-2016 Christopher Rosell / 2016-2026 Streamlink Team），商用/闭源友好。"
+  },
+  {
+   "topic": "metube 的真实形态（是服务不是库）",
+   "detail": "app/ytdl.py:3 import yt_dlp；:333 class _ConfinedYoutubeDL(yt_dlp.YoutubeDL)；:1723 yt_dlp.YoutubeDL(params=params).extract_info(url, download=False) —— 进程内库调用而非 subprocess；下载任务用 multiprocessing 隔离（:10）。app/main.py 是 aiohttp + python-socketio Web 服务（1623 行）。pyproject.toml：requires-python >=3.13，依赖 yt-dlp[default,curl-cffi,deno]、aiohttp、python-socketio、watchfiles。.github/workflows/update-yt-dlp.yml 每天 cron 0 0 * * * 自动升 yt-dlp —— 上游自己也认为引擎必须天天跟。结论：只作部署形态与工程实践参考，不作引擎依赖。"
+  },
+  {
+   "topic": "streamlink 的定位与插件体系",
+   "detail": "src/streamlink/plugins/ 共 135 个插件模块 + __init__.py；douyin.py / tiktok.py / bilibili.py / huya.py / douyu.py 均为直播（docstring $type live），youtube.py 明确 $notes VOD content and protected videos are not supported；无 kuaishou / xiaohongshu / weibo / weixin 插件。插件体系：@pluginmatcher(re.compile(...)) + Plugin 子类；内置插件惰性加载，靠打包预生成的 src/streamlink/plugins/_plugins.json（session/plugins.py:36-40）提供 matcher/argument 元数据，因此改内置插件文件或往里加插件无效，必须 sideload（docs/cli/plugin-sideloading.rst，https://streamlink.github.io/cli/plugin-sideloading.html 实测 200），入口 --plugin-dir/--plugin-dirs，同名插件优先于内置。"
+  },
+  {
+   "topic": "活跃度指标（2026-10-25 抓取，gh api）",
+   "detail": "yt-dlp：最近提交 2026-10-23T15:18:52Z；近 90 天提交 79；star 201398；open issue 2043 + open PR 676（open_issues_count 2721 是二者之和，不能直接当 issue 数）；stable 2026.10.21，近 12 次发布跨 2025-12-08→2026-10-21（约 26 天/次，区间 3~71 天），另有 nightly / master 渠道。metube：最近提交 2026-10-23T07:03:22Z；近 90 天提交 130；star 15086；open issue 6 + PR 1；发布极频繁（15 次跨 2026-08-21→2026-10-23，基本每次镜像构建一个 tag），最新 2026.10.23。streamlink：最近提交 2026-10-23T16:27:38Z；近 90 天提交 168；star 11864；open issue 61 + PR 8；最新 tag 8.6.2（2026-10-07），近一年 6 个 minor（8.0.0 2025-11-11 → 8.6.0 2026-09-13）。"
+  },
+  {
+   "topic": "发行渠道与必须跟 nightly 的证据",
+   "detail": "README:166-178：三个渠道 stable / nightly / master；原文 the latest stable release is often \"stale\" and prone to external breakage (i.e. sites changing things on their end and breaking yt-dlp)，并称 nightly 是 recommended channel for regular users；nightly 也可 pip install -U --pre yt-dlp[default]。update.py:195 注释 Only yt-dlp guarantees a stable release at least every 90 days，超期启动会打印 Your yt-dlp version (...) is older than 90 days!。nightly 二进制在独立仓库 yt-dlp/yt-dlp-nightly-builds（本次 gh api 访问该仓库遇到一次 TLS handshake timeout，符合环境已知问题）。"
+  }
+ ]
+}

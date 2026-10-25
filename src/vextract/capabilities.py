@@ -62,7 +62,8 @@ CAPABILITIES: list[dict[str, str]] = [
         "merge": "不需要（每张图独立落盘）",
         "verified": (
             "✅ 2026-10-25 微博实测 18 张图（pic_infos 7 档，按面积取 largest）；"
-            "抖音/小红书解析实现 + fixture 覆盖，线上正例待一条未失效链接"
+            "抖音实测 6 张（url_list 无水印 / download_url_list 带水印，优先 jpeg）；"
+            "小红书解析实现 + fixture 覆盖，线上正例待一条未失效分享链接"
         ),
     },
     {

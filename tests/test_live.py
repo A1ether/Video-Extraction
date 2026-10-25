@@ -43,11 +43,23 @@ async def test_kuaishou_live():
     assert any(s.codec == "hevc" for s in media.streams)
 
 
+DY_URL = "https://www.douyin.com/video/6961737553342991651"
+
+
 @pytest.mark.asyncio
-async def test_douyin_without_cookie_raises_auth_required():
-    """抖音无 cookie 必须给出 AUTH_REQUIRED + 可执行 hint，而不是原始报错。"""
+async def test_douyin_either_works_or_explains_the_argus_gate():
+    """抖音当前必被 Argus 挡：要么解析成功（路线改好后），要么 AUTH_REQUIRED 且说清缺什么。
+
+    注意别把这条写成"必须有 cookie"——实测带 70 条登录 cookie 也一样被拒（docs/01 §4.3）。
+    """
     from vextract.errors import AuthRequired
 
-    with pytest.raises(AuthRequired) as err:
-        await _extract("https://www.douyin.com/video/6961737553342991651")
-    assert "cookies-from-browser" in (err.value.hint or "")
+    try:
+        media = await _extract(DY_URL)
+    except AuthRequired as err:
+        hint = err.hint or ""
+        assert ("vx cookies import" in hint) or ("a_bogus" in hint)  # 必须给出可执行的下一步
+        assert "Traceback" not in hint
+        return
+    assert media.platform == "douyin"
+    assert any(not s.audio_only for s in media.streams)

@@ -241,6 +241,11 @@ class Douyin(Provider):
         video = detail.get("video") or {}
         streams = self._streams(video)
         assets = self._assets(detail)
+        if assets:
+            # 实测：图文作品的 `video` 里也有 play_addr（自动合成的幻灯片，duration=0、
+            # bit_rate 为空），会被 _streams 当成一路"视频流"——于是图集被当成视频下成 0.7MB 的 mp4。
+            # 有图就是图文作品，视频流一律丢掉。
+            streams = []
         if not streams and not assets:
             raise NoMedia(
                 "作品既没有视频也没有图片",
@@ -281,11 +286,13 @@ class Douyin(Provider):
 
     @staticmethod
     def _assets(detail: dict) -> list[Asset]:
-        """抖音图文：`images[]` 每项与 `video.cover` 是同一套 url_list 结构。
+        """抖音图文：`images[]` 每项的 `url_list` 是**无水印**直链。
 
-        实测口径：本机能拿到的样本作品是视频（`images`/`image_list` 都为空），
-        图文作品的字段形状按同一套 url_list 约定实现（`url_list[0]` 为直链）。
-        线上正例待一条未失效的图文链接来定案，见 docs/03。
+        实测（2026-10-25，10 条真实 `/note/` 链接里 8 条有图）：
+        - 图文作品的 `aweme_type` 是 **0**（不是 68），`images` 非空、`video.bit_rate` 为空；
+        - 每项有 `url_list`（`tplv-dy-aweme-images`，无水印）与 `download_url_list`
+          （`tplv-dy-water-v2`，**带水印**）两套，取错就会把水印图发给用户；
+        - 同一张图有多个 CDN 主机、webp 与 jpeg 两种编码，优先给 jpeg（兼容性更好）。
         """
         entries = detail.get("images") or detail.get("image_list") or []
         out: list[Asset] = []
@@ -297,12 +304,13 @@ class Douyin(Provider):
                 urls = [entry["url"]]
             if not urls:
                 continue
+            url = _prefer_common_format(urls)
             width, height = entry.get("width"), entry.get("height")
             out.append(
                 Asset(
-                    url=urls[0],
+                    url=url,
                     index=index,
-                    ext=ext_of_url(urls[0]),
+                    ext=ext_of_url(url),
                     width=int(width) if isinstance(width, int) else None,
                     height=int(height) if isinstance(height, int) else None,
                     headers={"Referer": REFERER},
@@ -394,6 +402,17 @@ def _short_side(node: dict) -> int:
     height = int(node.get("height") or 0)
     sides = [side for side in (width, height) if side > 0]
     return min(sides) if sides else 0
+
+
+_COMMON_IMAGE_SUFFIX = (".jpeg", ".jpg", ".png")
+
+
+def _prefer_common_format(urls: list[str]) -> str:
+    """同批里既有 webp 又有 jpeg 时优先 jpeg：不是所有看图/剪辑工具都吃 webp。"""
+    for url in urls:
+        if url.split("?")[0].lower().endswith(_COMMON_IMAGE_SUFFIX):
+            return url
+    return urls[0]
 
 
 def _first_url(node: dict) -> str | None:

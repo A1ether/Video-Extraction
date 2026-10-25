@@ -1,0 +1,74 @@
+{
+ "aweme_id": "7000000000000000000",
+ "aweme_type": 0,
+ "desc": "图文作品样本（文字已替换）：6 张图的图文笔记",
+ "author": {
+  "nickname": "某作者",
+  "sec_uid": "STUB_SEC_UID"
+ },
+ "statistics": {
+  "digg_count": 12,
+  "comment_count": 3,
+  "share_count": 1,
+  "collect_count": 5,
+  "play_count": 0
+ },
+ "images": [
+  {
+   "uri": "tos-cn-i-0813c001/STUB0",
+   "width": 1440,
+   "height": 3118,
+   "is_aigc_media": false,
+   "url_list": [
+    "https://p9-pc-sign.douyinpic.com/tos-cn-i-0813c001/STUB0~tplv-dy-aweme-images:q75.webp",
+    "https://p3-pc-sign.douyinpic.com/tos-cn-i-0813c001/STUB0~tplv-dy-aweme-images:q75.jpeg"
+   ],
+   "download_url_list": [
+    "https://p3-pc-sign.douyinpic.com/tos-cn-i-0813c001/STUB0~tplv-dy-water-v2:abc:1440:3118.jpeg"
+   ]
+  },
+  {
+   "uri": "tos-cn-i-0813c001/STUB1",
+   "width": 1440,
+   "height": 1888,
+   "is_aigc_media": false,
+   "url_list": [
+    "https://p9-pc-sign.douyinpic.com/tos-cn-i-0813c001/STUB1~tplv-dy-aweme-images:q75.webp",
+    "https://p3-pc-sign.douyinpic.com/tos-cn-i-0813c001/STUB1~tplv-dy-aweme-images:q75.jpeg"
+   ],
+   "download_url_list": [
+    "https://p3-pc-sign.douyinpic.com/tos-cn-i-0813c001/STUB1~tplv-dy-water-v2:abc:1440:3118.jpeg"
+   ]
+  },
+  {
+   "uri": "tos-cn-i-0813c001/STUB2",
+   "width": 1440,
+   "height": 1940,
+   "is_aigc_media": false,
+   "url_list": [
+    "https://p9-pc-sign.douyinpic.com/tos-cn-i-0813c001/STUB2~tplv-dy-aweme-images:q75.webp",
+    "https://p3-pc-sign.douyinpic.com/tos-cn-i-0813c001/STUB2~tplv-dy-aweme-images:q75.jpeg"
+   ],
+   "download_url_list": [
+    "https://p3-pc-sign.douyinpic.com/tos-cn-i-0813c001/STUB2~tplv-dy-water-v2:abc:1440:3118.jpeg"
+   ]
+  }
+ ],
+ "video": {
+  "duration": 0,
+  "width": 1440,
+  "height": 3118,
+  "play_addr": {
+   "url_list": [
+    "https://sf6-cdn-tos.douyinstatic.com/obj/tos-cn-ve-2774/STUB_SLIDESHOW"
+   ],
+   "height": 720
+  },
+  "cover": {
+   "url_list": [
+    "https://p3-sign.douyinpic.com/tos-cn-i-0813c001/STUB_COVER~tplv-dy-aweme-images.jpeg"
+   ]
+  },
+  "bit_rate": []
+ }
+}

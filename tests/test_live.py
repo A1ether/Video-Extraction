@@ -114,6 +114,33 @@ async def test_weibo_live_image_download_writes_numbered_folder(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_douyin_live_image_post_yields_watermark_free_assets():
+    """真实抖音图文（10 条 /note/ 链接里 8 条有图）：assets 非空、且不是水印地址。"""
+    if not _has_uifid():
+        pytest.skip("没有抖音 UIFID")
+
+    media = await _extract("https://www.douyin.com/note/7695600893685648610")
+    assert media.is_image_post, f"应当识别成图文，实际 streams={len(media.streams)} assets={len(media.assets)}"
+    assert len(media.assets) >= 2
+    assert all("dy-water" not in a.url for a in media.assets), "download_url_list 是带水印的"
+    assert media.assets[0].width and media.assets[0].height
+
+
+@pytest.mark.asyncio
+async def test_douyin_live_image_download_writes_real_jpegs(tmp_path):
+    if not _has_uifid():
+        pytest.skip("没有抖音 UIFID")
+
+    media = await _extract("https://www.douyin.com/note/7695600893685648610")
+    folder = await download.download(media, out_dir=tmp_path, mode="images")
+
+    files = sorted(folder.iterdir())
+    assert len(files) == len(media.assets)
+    head = files[0].read_bytes()[:3]
+    assert head == b"\xff\xd8\xff", "应当是真 JPEG（抖音默认给 webp，优先挑 jpeg 才对）"
+
+
+@pytest.mark.asyncio
 async def test_douyin_live_audio_download_extracts_and_tags(tmp_path):
     """抖音是音视频一体的 mp4：音频模式要用 ffmpeg 抽出音轨（并写入标签）。"""
     if not _has_uifid():

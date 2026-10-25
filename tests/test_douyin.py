@@ -194,6 +194,80 @@ def test_images_only_post_becomes_assets(provider: Douyin, detail: dict):
     assert "图集" in (media.quality_note or "")
 
 
+def test_cover_url_is_parsed_from_cover_block(provider: Douyin, detail: dict):
+    """回归：`_first_url` 曾因参数名写错（block/node）抛 NameError，而没有任何用例覆盖封面。
+
+    抖音 resolve 一定会走这条路径，所以它一坏就是"整条链路崩"，必须有断言钉住。
+    """
+    post = {**detail, "video": {**(detail.get("video") or {}), "cover": {"url_list": ["https://p3.douyinpic.com/cover.jpeg"]}}}
+    media = provider._to_media(post, "1")
+    assert media.cover_url == "https://p3.douyinpic.com/cover.jpeg"
+
+
+def test_image_urls_prefer_jpeg_over_webp():
+    """同批里同时给 webp 与 jpeg 时选 jpeg：不是所有看图/剪辑工具都吃 webp。"""
+    from vextract.providers.douyin import _prefer_common_format
+
+    urls = [
+        "https://p9.douyinpic.com/x~tplv-dy-aweme-images:q75.webp?lk3s=1",
+        "https://p3.douyinpic.com/x~tplv-dy-aweme-images:q75.jpeg?lk3s=1",
+    ]
+    assert _prefer_common_format(urls).endswith(".jpeg?lk3s=1")
+    assert _prefer_common_format(urls[:1]).endswith(".webp?lk3s=1"), "只有 webp 时就别硬挑"
+
+
+def test_assets_never_take_the_watermarked_url_list(provider: Douyin, detail: dict):
+    """抖音给两套地址：url_list（无水印）与 download_url_list（tplv-dy-water-v2 带水印）。"""
+    post = {
+        **detail,
+        "video": {},
+        "images": [
+            {
+                "url_list": ["https://p9.douyinpic.com/a~tplv-dy-aweme-images:q75.jpeg"],
+                "download_url_list": ["https://p3.douyinpic.com/a~tplv-dy-water-v2:abc:1440:3118.jpeg"],
+                "width": 1440,
+                "height": 3118,
+            }
+        ],
+    }
+    media = provider._to_media(post, "1")
+    assert media.is_image_post
+    assert "dy-water" not in media.assets[0].url
+    assert media.assets[0].ext == "jpeg"
+
+
+def test_image_post_ignores_the_auto_generated_slideshow_video(provider: Douyin, detail: dict):
+    """实测：图文作品的 video 里带 play_addr（自动合成幻灯片，duration=0、无 bit_rate），
+    旧实现把它当视频流 → 图集被下成 0.7MB 的 mp4，而不是 6 张原图。"""
+    post = {
+        **detail,
+        "video": {
+            "duration": 0,
+            "play_addr": {"url_list": ["https://sf6-cdn-tos.douyinstatic.com/slideshow.mp4"], "height": 720},
+        },
+        "images": [{"url_list": ["https://p9.douyinpic.com/a~tplv-dy-aweme-images:q75.jpeg"], "width": 1440, "height": 3118}],
+    }
+    media = provider._to_media(post, "1")
+    assert media.is_image_post
+    assert media.streams == [], "图文作品不该带视频流，否则默认模式会下成 mp4"
+    assert len(media.assets) == 1
+
+
+def test_real_image_post_fixture(fixture):
+    """真实图文作品裁出来的 fixture：aweme_type=0、6 张图、带一套水印地址。"""
+    import json
+
+    post = json.loads(fixture("douyin_image_post.json"))
+    media = Douyin()._to_media(post, "7000000000000000000")
+
+    assert media.is_image_post and media.streams == []
+    assert len(media.assets) == 3
+    assert [(a.width, a.height) for a in media.assets] == [(1440, 3118), (1440, 1888), (1440, 1940)]
+    assert all("dy-water" not in a.url for a in media.assets), "绝不能取 download_url_list"
+    assert all(a.ext == "jpeg" for a in media.assets), "同批有 jpeg 时优先 jpeg"
+    assert media.cover_url and "STUB_COVER" in media.cover_url
+
+
 def test_post_with_neither_video_nor_images_is_no_media(provider: Douyin, detail: dict):
     post = {**detail, "video": {}, "images": []}
     with pytest.raises(NoMedia):

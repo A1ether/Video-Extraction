@@ -56,7 +56,7 @@ async def test_task_runs_to_done_and_records_size(monkeypatch, tmp_path: Path):
     async def fake_download(
         media, *, out_dir, quality="best", stream_index=None, filename=None, mode=None,
         audio_format="m4a", embed_tags=True, transcribe=False, transcript_format="md",
-        asr_model=None, asr_language=None, progress=None, cancel=None, on_artifact=None,
+        asr_backend=None, asr_model=None, asr_language=None, progress=None, cancel=None, on_artifact=None,
     ):
         if progress:
             progress(dl.Progress(stage="下载视频流", done=5, total=10, overall=0.3))
@@ -113,7 +113,7 @@ async def test_cancel_marks_cancelled(monkeypatch, tmp_path: Path):
     async def slow_download(
         media, *, out_dir, quality="best", stream_index=None, filename=None, mode=None,
         audio_format="m4a", embed_tags=True, transcribe=False, transcript_format="md",
-        asr_model=None, asr_language=None, progress=None, cancel=None, on_artifact=None,
+        asr_backend=None, asr_model=None, asr_language=None, progress=None, cancel=None, on_artifact=None,
     ):
         for _ in range(200):
             if cancel and cancel():
@@ -142,7 +142,7 @@ async def test_events_fanout_reaches_subscribers(monkeypatch, tmp_path: Path):
     async def fake_download(
         media, *, out_dir, quality="best", stream_index=None, filename=None, mode=None,
         audio_format="m4a", embed_tags=True, transcribe=False, transcript_format="md",
-        asr_model=None, asr_language=None, progress=None, cancel=None, on_artifact=None,
+        asr_backend=None, asr_model=None, asr_language=None, progress=None, cancel=None, on_artifact=None,
     ):
         if progress:
             progress(dl.Progress(stage="下载视频流", done=1, total=2, overall=0.5))
@@ -217,7 +217,7 @@ async def test_task_passes_mode_options_and_collects_artifacts(monkeypatch, tmp_
     async def fake_download(
         media, *, out_dir, quality="best", stream_index=None, filename=None, mode=None,
         audio_format="m4a", embed_tags=True, transcribe=False, transcript_format="md",
-        asr_model=None, asr_language=None, progress=None, cancel=None, on_artifact=None,
+        asr_backend=None, asr_model=None, asr_language=None, progress=None, cancel=None, on_artifact=None,
     ):
         seen.update(mode=mode, audio_format=audio_format, transcribe=transcribe, transcript_format=transcript_format)
         folder = Path(out_dir) / "图集"
@@ -255,7 +255,7 @@ async def test_transcode_and_transcribe_stages_map_to_processing_state(monkeypat
     async def fake_download(
         media, *, out_dir, quality="best", stream_index=None, filename=None, mode=None,
         audio_format="m4a", embed_tags=True, transcribe=False, transcript_format="md",
-        asr_model=None, asr_language=None, progress=None, cancel=None, on_artifact=None,
+        asr_backend=None, asr_model=None, asr_language=None, progress=None, cancel=None, on_artifact=None,
     ):
         if progress:
             for stage in ("下载音频流", "转码", "转录"):
@@ -297,5 +297,6 @@ def test_history_keeps_mode_and_artifacts(monkeypatch, tmp_path: Path):
     fresh.load_history()
     reloaded = fresh.tasks["h2"]
     assert reloaded.mode == "images"
+    assert reloaded.serialize()["asr_backend"] is None
     assert [item.name for item in reloaded.artifacts] == ["01.jpg", "02.jpg"]
     assert reloaded.serialize()["artifacts"][0].endswith("01.jpg")

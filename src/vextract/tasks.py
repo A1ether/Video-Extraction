@@ -69,6 +69,7 @@ class Task:
     embed_tags: bool = True
     transcribe: bool = False
     transcript_format: TranscriptFormat = "md"
+    asr_backend: str | None = None
     asr_model: str | None = None
     asr_language: str | None = None
     state: TaskState = TaskState.queued
@@ -97,6 +98,7 @@ class Task:
             "audio_format": self.audio_format,
             "transcribe": self.transcribe,
             "transcript_format": self.transcript_format,
+            "asr_backend": self.asr_backend,
             "out_dir": str(self.out_dir),
             "media": self.media.model_dump() if self.media else None,
             "path": str(self.path) if self.path else None,
@@ -144,6 +146,7 @@ class TaskManager:
                 audio_format=row.get("audio_format") or "m4a",
                 transcribe=bool(row.get("transcribe")),
                 transcript_format=row.get("transcript_format") or "md",
+                asr_backend=row.get("asr_backend") or None,
                 path=Path(row["path"]) if row.get("path") else None,
                 artifacts=[Path(item) for item in (row.get("artifacts") or [])],
                 size=row.get("size"),
@@ -181,6 +184,7 @@ class TaskManager:
                 "audio_format": task.audio_format,
                 "transcribe": task.transcribe,
                 "transcript_format": task.transcript_format,
+                "asr_backend": task.asr_backend,
                 "path": str(task.path) if task.path else None,
                 "artifacts": [str(item) for item in task.artifacts],
                 "size": task.size,
@@ -206,6 +210,7 @@ class TaskManager:
         embed_tags: bool = True,
         transcribe: bool = False,
         transcript_format: TranscriptFormat = "md",
+        asr_backend: str | None = None,
         asr_model: str | None = None,
         asr_language: str | None = None,
     ) -> Task:
@@ -221,6 +226,7 @@ class TaskManager:
             embed_tags=embed_tags,
             transcribe=transcribe,
             transcript_format=transcript_format,
+            asr_backend=asr_backend,
             asr_model=asr_model,
             asr_language=asr_language,
             _manager=self,
@@ -313,6 +319,7 @@ class TaskManager:
                 embed_tags=task.embed_tags,
                 transcribe=task.transcribe,
                 transcript_format=task.transcript_format,
+                asr_backend=task.asr_backend,
                 asr_model=task.asr_model,
                 asr_language=task.asr_language,
                 progress=progress_cb,

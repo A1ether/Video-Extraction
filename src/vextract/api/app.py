@@ -69,6 +69,7 @@ class TaskRequest(BaseModel):
     embed_tags: bool = True
     transcribe: bool = Field(default=False, description="音频落盘后再跑本地 ASR 出文字稿")
     transcript_format: TranscriptFormat = "md"
+    asr_backend: str | None = Field(default=None, description="mlx_whisper / faster_whisper / whisper；留空自动挑")
     asr_model: str | None = None
     asr_language: str | None = None
 
@@ -175,6 +176,7 @@ async def create_task(payload: TaskRequest) -> dict:
         embed_tags=payload.embed_tags,
         transcribe=payload.transcribe,
         transcript_format=payload.transcript_format,
+        asr_backend=payload.asr_backend,
         asr_model=payload.asr_model,
         asr_language=payload.asr_language,
     )
@@ -322,10 +324,16 @@ async def download_endpoint(payload: TaskRequest) -> dict:
         embed_tags=payload.embed_tags,
         transcribe=payload.transcribe,
         transcript_format=payload.transcript_format,
+        asr_backend=payload.asr_backend,
         asr_model=payload.asr_model,
         asr_language=payload.asr_language,
     )
-    return {"path": str(path), "size": path.stat().st_size, "media": media.model_dump()}
+    size = (
+        sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+        if path.is_dir()
+        else path.stat().st_size
+    )
+    return {"path": str(path), "size": size, "media": media.model_dump()}
 
 
 # ---------- 前端 ----------

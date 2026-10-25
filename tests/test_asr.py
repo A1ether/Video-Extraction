@@ -171,7 +171,60 @@ def test_transcribe_translates_backend_crash(monkeypatch, tmp_path: Path):
     with pytest.raises(TranscribeFailed) as err:
         asr.transcribe(audio)
     assert "RuntimeError" in err.value.message
-    assert "hf-mirror" in (err.value.hint or ""), "权重下不来是国内最常见的坑，hint 必须提到镜像"
+    assert "faster_whisper" in err.value.message or "mlx_whisper" in err.value.message, "报错要说清试的是哪套后端/模型"
+    hint = err.value.hint or ""
+    assert "hf-mirror" in hint, "权重下不来是国内最常见的坑，hint 必须提到镜像"
+    assert "后端专属" in hint, "模型名与后端绑定的坑要写出来（mlx 全名 vs CT2 短名）"
+
+
+def test_transcribe_honours_explicit_backend(monkeypatch, tmp_path: Path):
+    """非人声音频要能换到 faster_whisper（VAD）；错误提示会推荐它，入口就必须真的存在。"""
+    used: list[str] = []
+
+    def mlx(_audio, *, model, language):
+        used.append("mlx")
+        return asr.Transcript(text="x", backend="mlx_whisper", model=model)
+
+    def faster(_audio, *, model, language):
+        used.append("faster")
+        return asr.Transcript(text="y", backend="faster_whisper", model=model)
+
+    monkeypatch.setattr(asr, "is_installed", lambda _name: True)
+    monkeypatch.setattr(asr, "_RUNNERS", {"mlx_whisper": mlx, "faster_whisper": faster, "whisper": mlx})
+    audio = tmp_path / "a.m4a"
+    audio.write_bytes(b"x")
+
+    assert asr.transcribe(audio, backend="faster_whisper").backend == "faster_whisper"
+    assert asr.transcribe(audio, backend="mlx_whisper").backend == "mlx_whisper"
+    assert used == ["faster", "mlx"], "显式指定的后端必须落到对应 runner"
+
+
+def test_degeneracy_hint_only_names_backends_the_cli_accepts(monkeypatch, tmp_path: Path):
+    """hint 会写「换 --asr-backend faster_whisper 重试」——那个值必须在 BACKENDS 里，
+    否则用户照着做只会撞上「不认识的后端」。"""
+    fake_runner(monkeypatch, text=HALLUCINATION_LOOP)
+    audio = tmp_path / "a.m4a"
+    audio.write_bytes(b"x")
+
+    with pytest.raises(TranscribeFailed) as err:
+        asr.transcribe(audio)
+
+    hint = err.value.hint or ""
+    assert [name for name in asr.BACKENDS if name in hint], hint
+    assert "--asr-backend" in hint, hint
+
+
+def test_av_incompatibility_is_explained_not_dumped(monkeypatch, tmp_path: Path):
+    """实测踩到：faster-whisper 1.2.1 传 metadata_errors=，av 19 删了这个参数。
+    用户需要看到"装 av<19"，而不是一句 TypeError。"""
+    fake_runner(monkeypatch, raises=TypeError("open() got an unexpected keyword argument 'metadata_errors'"))
+    audio = tmp_path / "a.m4a"
+    audio.write_bytes(b"x")
+
+    with pytest.raises(TranscribeFailed) as err:
+        asr.transcribe(audio)
+    assert "av 版本" in err.value.message
+    assert "av<19" in (err.value.hint or "")
 
 
 def test_transcribe_passes_language_and_model_through(monkeypatch, tmp_path: Path):

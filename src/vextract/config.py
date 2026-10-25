@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     """音频落盘时写入标题/作者/来源标签。"""
     transcript_format: str = "md"
     """本地转录的默认产物格式。"""
+    asr_backend: str | None = None
+    """ASR 后端；留空按偏好自动挑（mlx_whisper → faster_whisper → whisper）。
+
+    faster-whisper 自带 VAD，非人声音频上比 mlx 少一整类重复幻觉，所以要能选。
+    """
     asr_model: str | None = None
     """ASR 模型名；留空用后端默认（mlx-whisper → large-v3-turbo）。"""
     asr_language: str | None = None
@@ -48,6 +53,8 @@ settings = Settings()
 BROWSER_CHOICES = ("", "chrome", "edge", "firefox", "safari", "chromium", "brave", "opera", "vivaldi")
 AUDIO_FORMATS = ("m4a", "mp3", "flac")
 TRANSCRIPT_FORMATS = ("md", "txt", "srt")
+ASR_BACKENDS = ("mlx_whisper", "faster_whisper", "whisper")
+"""与 asr.BACKENDS 一致；放这里是为了 settings 序列化时不 import 模型库。"""
 
 
 class SettingsPatch(BaseModel):
@@ -57,6 +64,7 @@ class SettingsPatch(BaseModel):
     audio_format: str | None = None
     embed_tags: bool | None = None
     transcript_format: str | None = None
+    asr_backend: str | None = None
     asr_model: str | None = None
     asr_language: str | None = None
 
@@ -89,6 +97,8 @@ def load_persisted() -> None:
         settings.embed_tags = data["embed_tags"]
     if data.get("transcript_format") in TRANSCRIPT_FORMATS:
         settings.transcript_format = data["transcript_format"]
+    if isinstance(data.get("asr_backend"), str):
+        settings.asr_backend = data["asr_backend"] or None
     if isinstance(data.get("asr_model"), str):
         settings.asr_model = data["asr_model"] or None
     if isinstance(data.get("asr_language"), str):
@@ -108,6 +118,8 @@ def save(patch: SettingsPatch) -> dict:
         settings.embed_tags = patch.embed_tags
     if patch.transcript_format:
         settings.transcript_format = patch.transcript_format
+    if patch.asr_backend is not None:
+        settings.asr_backend = patch.asr_backend or None
     if patch.asr_model is not None:
         settings.asr_model = patch.asr_model or None
     if patch.asr_language is not None:
@@ -136,8 +148,10 @@ def as_dict() -> dict:
         "audio_format": settings.audio_format,
         "embed_tags": settings.embed_tags,
         "transcript_format": settings.transcript_format,
+        "asr_backend": settings.asr_backend or "",
         "asr_model": settings.asr_model or "",
         "asr_language": settings.asr_language or "",
+        "asr_backend_choices": ["", *ASR_BACKENDS],
         "cookie_dir": str(settings.cookie_dir),
         "home": str(settings.home),
         "browser_choices": list(BROWSER_CHOICES),

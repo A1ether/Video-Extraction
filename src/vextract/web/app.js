@@ -260,7 +260,9 @@ function renderMedia(data) {
   }
   const audioTools = el("div", { class: "row wrap gap8 hidden" }, [
     el("span", { class: "muted", text: "格式" }), audioFormat,
-    el("label", { class: "row gap6", style: "cursor:pointer" }, [transcribeBox, el("span", { text: "本地转录出文字稿" })]),
+    el("label", { class: "row gap6", style: "cursor:pointer", title: "纯音乐/环境音会让 Whisper 陷入重复循环；那种素材换 faster_whisper 后端（设置页可选）" }, [
+      transcribeBox, el("span", { text: "本地转录出文字稿" }),
+    ]),
     el("span", { class: "muted", text: "文字稿" }), transcriptFormat,
   ]);
 
@@ -711,6 +713,14 @@ async function loadSettings() {
   $("#set-home").textContent = settings.home || "";
   $("#set-realtime").checked = settings.realtime !== false;
   $("#set-embed-tags").checked = settings.embed_tags !== false;
+  const backendSelect = $("#set-asr-backend");
+  const installed = (doctor.asr && doctor.asr.available) || [];
+  backendSelect.replaceChildren(...(settings.asr_backend_choices || [""]).map((name) =>
+    el("option", {
+      value: name,
+      text: name ? `${name}${installed.includes(name) ? "" : "（未安装）"}` : "自动（按偏好）",
+      selected: (settings.asr_backend || "") === name ? "selected" : null,
+    })));
   $("#set-asr-model").value = settings.asr_model || "";
   $("#set-asr-language").value = settings.asr_language || "";
   const audioSelect = $("#set-audio-format");
@@ -734,6 +744,7 @@ $("#btn-save-settings").addEventListener("click", async () => {
         audio_format: $("#set-audio-format").value,
         transcript_format: $("#set-transcript-format").value,
         embed_tags: $("#set-embed-tags").checked,
+        asr_backend: $("#set-asr-backend").value,
         asr_model: $("#set-asr-model").value.trim(),
         asr_language: $("#set-asr-language").value.trim(),
       },

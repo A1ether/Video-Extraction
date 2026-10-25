@@ -204,6 +204,9 @@ def get(
     no_tags: bool = typer.Option(False, "--no-tags", help="不把标题/作者/来源写进音频标签"),
     transcribe: bool = typer.Option(False, "--transcribe", help="音频落盘后再跑本地 ASR，输出文字稿"),
     transcript_format: str = typer.Option("md", "--transcript-format", help="文字稿格式：md/txt/srt"),
+    asr_backend: str | None = typer.Option(
+        None, "--asr-backend", help="mlx_whisper/faster_whisper/whisper；非人声音频建议 faster_whisper（自带 VAD）"
+    ),
     asr_model: str | None = typer.Option(None, "--asr-model", help="ASR 模型（默认按后端取值，见 vx doctor）"),
     asr_language: str | None = typer.Option(None, "--asr-language", help="zh/en/…；留空让模型自己判断"),
 ) -> None:
@@ -214,6 +217,7 @@ def get(
     transcript_format = cast(
         "TranscriptFormat", _choice(transcript_format, ("md", "txt", "srt"), "transcript-format") or "md"
     )
+    asr_backend = _choice(asr_backend, asr.BACKENDS, "asr-backend")
 
     try:
         media = asyncio.run(registry.extract(text, quality=quality))
@@ -237,6 +241,7 @@ def get(
                 embed_tags=not no_tags,
                 transcribe=transcribe,
                 transcript_format=transcript_format,
+                asr_backend=asr_backend,
                 asr_model=asr_model,
                 asr_language=asr_language,
                 progress=_progress,

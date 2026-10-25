@@ -119,7 +119,7 @@ def test_audio_controls_and_transcribe_toggle_exist():
 
 
 def test_settings_panel_binds_audio_and_asr_fields():
-    for element in ("set-audio-format", "set-transcript-format", "set-asr-model", "set-asr-language", "set-embed-tags", "asr-status"):
+    for element in ("set-audio-format", "set-transcript-format", "set-asr-backend", "set-asr-model", "set-asr-language", "set-embed-tags", "asr-status"):
         assert f'id="{element}"' in INDEX, f"设置页缺 {element}"
 
 

@@ -55,12 +55,13 @@ def patch_success(monkeypatch, tmp_path: Path, *, size: int = 8, captured: dict 
     async def fake_download(
         media, *, out_dir, quality="best", stream_index=None, filename=None, mode=None,
         audio_format="m4a", embed_tags=True, transcribe=False, transcript_format="md",
-        asr_model=None, asr_language=None, progress=None, cancel=None, on_artifact=None,
+        asr_backend=None, asr_model=None, asr_language=None, progress=None, cancel=None, on_artifact=None,
     ):
         if captured is not None:   # 用来断言"前端传的模式/格式真的走到了下载层"
             captured.update(
                 mode=mode, audio_format=audio_format, embed_tags=embed_tags, transcribe=transcribe,
-                transcript_format=transcript_format, asr_model=asr_model, asr_language=asr_language,
+                transcript_format=transcript_format, asr_backend=asr_backend,
+                asr_model=asr_model, asr_language=asr_language,
             )
         if progress:
             progress(dl.Progress(stage="下载视频流", done=size // 2, total=size, overall=0.5))
@@ -331,7 +332,7 @@ def test_legacy_download_endpoint_still_works(client, monkeypatch, tmp_path: Pat
 def test_doctor_reports_asr_and_ffprobe(client):
     body = client.get("/doctor").json()
     assert "ffprobe" in body
-    assert set(body["asr"]) >= {"available", "backend", "model"}
+    assert set(body["asr"]) >= {"available", "backend", "model", "choices"}
     assert isinstance(body["asr"]["available"], list)
 
 
@@ -358,8 +359,33 @@ def test_task_threads_mode_and_audio_options_to_downloader(client, monkeypatch, 
     assert task["state"] == "done", task
     assert captured == {
         "mode": "audio", "audio_format": "mp3", "embed_tags": False, "transcribe": True,
-        "transcript_format": "srt", "asr_model": None, "asr_language": None,
+        "transcript_format": "srt", "asr_backend": None, "asr_model": None, "asr_language": None,
     }
+
+
+def test_task_threads_asr_backend(client, monkeypatch, tmp_path: Path):
+    captured: dict = {}
+    patch_success(monkeypatch, tmp_path, captured=captured)
+
+    created = client.post(
+        "/tasks",
+        json={
+            "text": "x", "out_dir": str(tmp_path), "mode": "audio", "transcribe": True,
+            "asr_backend": "faster_whisper", "asr_language": "zh",
+        },
+    ).json()
+    assert created["asr_backend"] == "faster_whisper"
+
+    for _ in range(200):
+        task = client.get(f"/tasks/{created['id']}").json()
+        if task["state"] in ("done", "error"):
+            break
+    assert captured["asr_backend"] == "faster_whisper"
+
+
+def test_task_rejects_unknown_asr_backend(client, tmp_path: Path):
+    resp = client.post("/tasks", json={"text": "x", "out_dir": str(tmp_path), "asr_backend": "whisperx"})
+    assert resp.status_code == 202, "后端是自由字符串（asr.pick_backend 会给出可选值），不是枚举"
 
 
 def test_task_rejects_unknown_mode(client, tmp_path: Path):

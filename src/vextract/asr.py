@@ -149,6 +149,7 @@ def describe() -> dict[str, Any]:
         "available": found,
         "backend": backend,
         "model": model_for(backend, None) if backend else DEFAULT_MODEL,
+        "choices": list(BACKENDS),
         "hint": INSTALL_HINT if not found else None,
     }
 
@@ -224,10 +225,29 @@ def transcribe(
         result = _RUNNERS[name](audio, model=resolved, language=language)
     except DependencyMissing:
         raise
+    except TypeError as exc:
+        if "metadata_errors" in str(exc):
+            # 实测：faster-whisper 1.2.1 传 metadata_errors=，av 19 已删掉这个关键字
+            raise TranscribeFailed(
+                f"转录失败（{name}）：av 版本与 faster-whisper 不兼容",
+                hint="`uv add 'av<19'`（av 19 删了 metadata_errors 参数，faster-whisper 1.2.1 还在传它）",
+                detail=str(exc)[:200],
+            ) from exc
+        raise TranscribeFailed(
+            f"转录失败（{name} / {resolved}）：{type(exc).__name__}: {exc}",
+            hint="检查音频文件是否损坏；若换过后端，模型名要跟着换（mlx 用 HF 全名、faster-whisper 用短名）",
+            detail=str(exc)[:200],
+        ) from exc
     except Exception as exc:  # noqa: BLE001 — 模型/权重/设备问题统一翻译
         raise TranscribeFailed(
-            f"转录失败（{name}）：{type(exc).__name__}: {exc}",
-            hint="常见原因：模型权重没下下来（可 export HF_ENDPOINT=https://hf-mirror.com）、磁盘空间不足、音频损坏",
+            f"转录失败（{name} / {resolved}）：{type(exc).__name__}: {exc}",
+            hint=(
+                "常见原因：\n"
+                "  ① **模型名是后端专属的**——mlx 用 `mlx-community/whisper-small-mlx` 这类 HF 全名，"
+                "faster-whisper 用 `small`/`large-v3-turbo`/`Systran/faster-whisper-*`；换后端时模型名要一起换\n"
+                "  ② 权重没下下来（国内可 `export HF_ENDPOINT=https://hf-mirror.com`）\n"
+                "  ③ 磁盘空间不足，或音频损坏"
+            ),
             detail=str(exc)[:200],
         ) from exc
     if not result.text:
@@ -241,8 +261,8 @@ def transcribe(
             hint=(
                 "这条音频里大概没有人声（纯音乐/BGM/环境音）——Whisper 在这类音频上会陷入重复循环，"
                 "本机实测：一首歌被写成「詞曲 李宗盛 曲 李宗盛 … Zither Harp …」循环数百次。\n"
-                "建议：换成有人声的素材；只要音频就 `--mode audio`（不要 --transcribe）；"
-                "或改用 faster-whisper 后端（自带 VAD，能剔掉无人声段）"
+                "建议：① 换成有人声的素材；② 只要音频就 `--mode audio`（不要 --transcribe）；"
+                "③ 换后端重试：`--asr-backend faster_whisper`（自带 VAD，会先剔掉无人声段）"
             ),
             detail=result.text[:120],
         )

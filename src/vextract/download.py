@@ -513,6 +513,7 @@ async def download(
     embed_tags: bool = True,
     transcribe: bool = False,
     transcript_format: TranscriptFormat = "md",
+    asr_backend: str | None = None,
     asr_model: str | None = None,
     asr_language: str | None = None,
     progress: ProgressCb | None = None,
@@ -553,13 +554,16 @@ async def download(
         if transcribe:
             from . import asr  # 延迟导入：没装 ASR 依赖时不该影响普通下载
 
+            backend = asr_backend or config.settings.asr_backend
             model = asr_model or config.settings.asr_model
             language = asr_language or config.settings.asr_language
-            _emit(progress, "转录", 0, None, f"本地 ASR（{model or asr.DEFAULT_MODEL}）", "audio")
+            label = f"{backend or 'auto'}·{model or asr.DEFAULT_MODEL}"
+            _emit(progress, "转录", 0, None, f"本地 ASR（{label}）", "audio")
             written = await asr.transcribe_to_files(
                 media,
                 path,
                 fmt=transcript_format,
+                backend=backend,
                 model=model,
                 language=language,
             )

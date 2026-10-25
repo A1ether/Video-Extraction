@@ -36,6 +36,14 @@ def test_info_renders_error_with_hint(monkeypatch):
     assert "请用视频笔记" in result.stdout
 
 
+def test_get_rejects_unknown_asr_backend():
+    """后端名写错时要立刻说清可选值，而不是留到转录时才炸。"""
+    result = runner.invoke(app, ["get", "https://example/v/1", "--asr-backend", "whisperx"])
+    assert result.exit_code == 1
+    assert "asr-backend" in result.stdout
+    assert "mlx_whisper" in result.stdout and "faster_whisper" in result.stdout
+
+
 def test_info_json_output(monkeypatch):
     from vextract.models import MediaInfo, Stream
 

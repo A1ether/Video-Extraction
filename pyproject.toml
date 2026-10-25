@@ -24,7 +24,12 @@ vx = "vextract.cli:app"
 [project.optional-dependencies]
 # 本地转录是可选的：不装也能用视频/音频/图集，装了才能 --transcribe。
 # 两者都是 MIT 许可（与项目依赖口径一致，见 README「许可证与合规」）。
-transcribe = ["faster-whisper>=1.0.0"]        # 跨平台、体积小（CTranslate2 推理）
+transcribe = [
+    "faster-whisper>=1.0.0",
+    # faster-whisper 1.2.1 内部调用 av.open(..., metadata_errors="ignore")，
+    # 而 av 19.0 起不再接受这个关键字 → 实跑必 TypeError（已实测 19.0.2 崩、18.1.0 正常）
+    "av>=11,<19",
+]
 transcribe-mlx = ["mlx-whisper>=0.4.0; sys_platform == 'darwin'"]   # Apple Silicon 最快；连带 torch，实测 .venv 约 1.3GB
 
 [dependency-groups]

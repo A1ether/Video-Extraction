@@ -7,16 +7,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import sys
 from pathlib import Path
+from typing import cast
 
 import typer
 from rich.console import Console
 from rich.json import JSON
 from rich.table import Table
 
-from . import capabilities, config, cookies, download, engine, ports, registry
+from . import asr, capabilities, config, cookies, download, engine, ports, registry
 from .errors import CookieExportInvalid, VextractError
+from .models import AudioFormat, Mode, TranscriptFormat
 
 app = typer.Typer(add_completion=False, help="自媒体视频提取工具：分享链接 → 无水印视频 + 元数据")
 console = Console()
@@ -25,6 +28,26 @@ cookies_app = typer.Typer(help="cookie 阶梯：导入浏览器导出、查看�
 app.add_typer(cookies_app, name="cookies")
 
 BANNER = "vextract"
+
+
+def _path_size(path: Path) -> int:
+    """产物可能是文件（视频/音频）也可能是目录（图集），体积都要算对。"""
+    if path.is_dir():
+        return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+    return path.stat().st_size
+
+
+def _choice(value: str | None, allowed: tuple[str, ...], what: str) -> str | None:
+    """把非法取值变成带 hint 的错误，而不是让 typer 抛一段看不出所以然的堆栈。"""
+    if value is None or value in allowed:
+        return value
+    _fail(
+        VextractError(
+            f"{what} 只能是 {'/'.join(allowed)}，收到 {value!r}",
+            hint=f"例：vx get '<链接>' --{what} {allowed[0]}",
+        )
+    )
+    return None
 
 
 def _fail(exc: VextractError) -> None:
@@ -58,6 +81,16 @@ def doctor() -> None:
 
     ff = download.ffmpeg_path()
     table.add_row("ffmpeg", f"[green]{ff}[/green]" if ff else "[red]未找到（B站/YouTube 无法合并）[/red]")
+    ffprobe = shutil.which("ffprobe")
+    table.add_row(
+        "ffprobe",
+        f"[green]{ffprobe}[/green]" if ffprobe else "[yellow]未找到（音频模式会退回「总是转码」，仍能出文件）[/yellow]",
+    )
+    status = asr.describe()
+    if status["available"]:
+        table.add_row("本地转录", f"[green]{status['available'][0]}[/green] · 默认模型 {status['model']}")
+    else:
+        table.add_row("本地转录", "[yellow]未安装（uv sync --extra transcribe）[/yellow]")
     try:
         table.add_row("yt-dlp", f"[green]{engine.engine_version()}[/green]")
     except Exception as exc:  # noqa: BLE001
@@ -128,7 +161,16 @@ def info(
     if as_json:
         console.print(JSON(json.dumps(media.model_dump(), ensure_ascii=False)))
         return
-    console.print(f"[bold]{media.summary()}[/bold]")
+    console.print(f"[bold]{media.summary()}[/bold] · {media.work_kind}")
+    if media.assets:
+        asset_table = Table(show_header=True, header_style="bold", title="图集")
+        for column in ("#", "尺寸", "格式"):
+            asset_table.add_column(column)
+        for asset in sorted(media.assets, key=lambda a: a.index):
+            side = f"{asset.width}x{asset.height}" if asset.width and asset.height else "—"
+            asset_table.add_row(str(asset.index), side, asset.ext)
+        console.print(asset_table)
+        console.print("[dim]图文作品：下载用 `vx get <链接> --mode images`（或前端「图集」模式）[/dim]")
     if media.quality_note:
         console.print(f"[yellow]提示：{media.quality_note}[/yellow]")
     table = Table(show_header=True, header_style="bold")
@@ -154,31 +196,65 @@ def info(
 def get(
     text: str = typer.Argument(..., help="分享文本或链接"),
     out: Path = typer.Option(None, "-o", "--out", help="输出目录，默认 ~/Downloads"),
-    quality: str = typer.Option("best", "-q", "--quality", help="best/1080p/720p/480p"),
+    quality: str = typer.Option("best", "-q", "--quality", help="best/1080p/720p/480p；`audio` 等同 --mode audio"),
     filename: str = typer.Option(None, "-f", "--filename", help="自定义文件名（不含扩展名）"),
     cookies_from_browser: str | None = typer.Option(None, "--cookies-from-browser", help="chrome/firefox/edge 等"),
+    mode: str | None = typer.Option(None, "--mode", help="video/audio/images；留空按内容推断（图文→images）"),
+    audio_format: str = typer.Option("m4a", "--audio-format", help="仅音频模式的容器：m4a/mp3/flac"),
+    no_tags: bool = typer.Option(False, "--no-tags", help="不把标题/作者/来源写进音频标签"),
+    transcribe: bool = typer.Option(False, "--transcribe", help="音频落盘后再跑本地 ASR，输出文字稿"),
+    transcript_format: str = typer.Option("md", "--transcript-format", help="文字稿格式：md/txt/srt"),
+    asr_model: str | None = typer.Option(None, "--asr-model", help="ASR 模型（默认按后端取值，见 vx doctor）"),
+    asr_language: str | None = typer.Option(None, "--asr-language", help="zh/en/…；留空让模型自己判断"),
 ) -> None:
-    """解析并下载（必要时自动 ffmpeg 合并）。"""
+    """解析并下载：视频 / 仅音频 / 图集，可选本地转录。"""
     config.set_cookies_from_browser(cookies_from_browser)
+    mode = cast("Mode | None", _choice(mode, ("video", "audio", "images"), "mode"))
+    audio_format = cast("AudioFormat", _choice(audio_format, ("m4a", "mp3", "flac"), "audio-format") or "m4a")
+    transcript_format = cast(
+        "TranscriptFormat", _choice(transcript_format, ("md", "txt", "srt"), "transcript-format") or "md"
+    )
+
     try:
         media = asyncio.run(registry.extract(text, quality=quality))
-        console.print(f"[bold]{media.summary()}[/bold]")
-        if media.quality_note:
-            console.print(f"[yellow]提示：{media.quality_note}[/yellow]")
+    except VextractError as exc:
+        _fail(exc)
+        return
+    console.print(f"[bold]{media.summary()}[/bold] · {media.work_kind}")
+    if media.quality_note:
+        console.print(f"[yellow]提示：{media.quality_note}[/yellow]")
+
+    artifacts: list[Path] = []
+    try:
         path = asyncio.run(
             download.download(
                 media,
                 out_dir=out or config.settings.out_dir,
                 quality=quality,
                 filename=filename,
+                mode=mode,
+                audio_format=audio_format,
+                embed_tags=not no_tags,
+                transcribe=transcribe,
+                transcript_format=transcript_format,
+                asr_model=asr_model,
+                asr_language=asr_language,
                 progress=_progress,
+                on_artifact=artifacts.append,
             )
         )
     except VextractError as exc:
         _fail(exc)
         return
-    size = path.stat().st_size / 1048576
-    console.print(f"[bold green]✔ 完成[/bold green] {path}  ({size:.1f} MB)")
+    size = _path_size(path)
+    console.print(f"[bold green]✔ 完成[/bold green] {path}  ({size / 1048576:.1f} MB)")
+    for artifact in artifacts:
+        if artifact.suffix in (".md", ".txt", ".srt"):
+            console.print(f"  [green]文字稿[/green] {artifact}")
+        elif len(artifacts) <= 12:
+            console.print(f"  [dim]{artifact.name}[/dim]")
+    if len(artifacts) > 12:
+        console.print(f"  [dim]… 共 {len(artifacts)} 个文件[/dim]")
 
 
 @app.command("serve")
@@ -269,7 +345,7 @@ def _serve_once(host: str, port: int, url: str, open_browser: bool) -> None:
 
 
 def _progress(event: download.Progress) -> None:
-    label = event.stage
+    label = event.stage + (f"（{event.message}）" if event.message and event.stage != "完成" else "")
     done = event.done
     total = event.total
     if total:

@@ -48,11 +48,20 @@ def fake_media() -> MediaInfo:
     )
 
 
-def patch_success(monkeypatch, tmp_path: Path, *, size: int = 8):
+def patch_success(monkeypatch, tmp_path: Path, *, size: int = 8, captured: dict | None = None):
     async def fake_extract(text: str, *, quality: str = "best"):
         return fake_media()
 
-    async def fake_download(media, *, out_dir, quality="best", stream_index=None, filename=None, progress=None, cancel=None):
+    async def fake_download(
+        media, *, out_dir, quality="best", stream_index=None, filename=None, mode=None,
+        audio_format="m4a", embed_tags=True, transcribe=False, transcript_format="md",
+        asr_model=None, asr_language=None, progress=None, cancel=None, on_artifact=None,
+    ):
+        if captured is not None:   # 用来断言"前端传的模式/格式真的走到了下载层"
+            captured.update(
+                mode=mode, audio_format=audio_format, embed_tags=embed_tags, transcribe=transcribe,
+                transcript_format=transcript_format, asr_model=asr_model, asr_language=asr_language,
+            )
         if progress:
             progress(dl.Progress(stage="下载视频流", done=size // 2, total=size, overall=0.5))
         target = Path(out_dir) / "out.mp4"
@@ -285,8 +294,106 @@ def test_static_assets_are_served(client):
     assert client.get("/static/styles.css").status_code == 200
 
 
+def test_file_response_declares_real_content_types(client, isolated_home, tmp_path: Path):
+    """按扩展名发 Content-Type。
+
+    回归点：早先把 ".jpg" 当成路径再取一次 suffix，结果**所有文件都是
+    application/octet-stream**——浏览器播放/试听/预览全靠猜类型。
+    """
+    cases = {
+        "clip.mp4": "video/mp4",
+        "song.m4a": "audio/mp4",
+        "song.mp3": "audio/mpeg",
+        "01.jpg": "image/jpeg",
+        "文字稿.md": "text/markdown; charset=utf-8",
+        "字幕.srt": "application/x-subrip; charset=utf-8",
+    }
+    for index, (name, expected) in enumerate(cases.items()):
+        target = tmp_path / name
+        target.write_bytes(b"data")
+        task_id = f"t{index}"
+        isolated_home.tasks[task_id] = tasks.Task(
+            id=task_id, text="x", out_dir=tmp_path, state=tasks.TaskState.done, path=target, _manager=isolated_home,
+        )
+        resp = client.get(f"/tasks/{task_id}/file")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith(expected), f"{name} → {resp.headers['content-type']}"
+
+
 def test_legacy_download_endpoint_still_works(client, monkeypatch, tmp_path: Path):
     patch_success(monkeypatch, tmp_path)
     body = client.post("/download", json={"text": "x", "out_dir": str(tmp_path)}).json()
     assert body["path"].endswith("out.mp4")
     assert body["size"] == 8
+
+
+# ---------- 产物模式（音频 / 图集）----------
+def test_doctor_reports_asr_and_ffprobe(client):
+    body = client.get("/doctor").json()
+    assert "ffprobe" in body
+    assert set(body["asr"]) >= {"available", "backend", "model"}
+    assert isinstance(body["asr"]["available"], list)
+
+
+def test_task_threads_mode_and_audio_options_to_downloader(client, monkeypatch, tmp_path: Path):
+    captured: dict = {}
+    patch_success(monkeypatch, tmp_path, captured=captured)
+
+    created = client.post(
+        "/tasks",
+        json={
+            "text": "x", "out_dir": str(tmp_path),
+            "mode": "audio", "audio_format": "mp3", "embed_tags": False,
+            "transcribe": True, "transcript_format": "srt",
+        },
+    )
+    assert created.status_code == 202
+    task = created.json()
+    assert task["mode"] == "audio" and task["audio_format"] == "mp3" and task["transcribe"] is True
+
+    for _ in range(200):
+        task = client.get(f"/tasks/{task['id']}").json()
+        if task["state"] in ("done", "error"):
+            break
+    assert task["state"] == "done", task
+    assert captured == {
+        "mode": "audio", "audio_format": "mp3", "embed_tags": False, "transcribe": True,
+        "transcript_format": "srt", "asr_model": None, "asr_language": None,
+    }
+
+
+def test_task_rejects_unknown_mode(client, tmp_path: Path):
+    resp = client.post("/tasks", json={"text": "x", "out_dir": str(tmp_path), "mode": "podcast"})
+    assert resp.status_code == 422
+
+
+def test_task_artifact_route_serves_indexed_files(client, isolated_home, tmp_path: Path):
+    folder = tmp_path / "图集"
+    folder.mkdir()
+    (folder / "01.jpg").write_bytes(b"\xff\xd8one")
+    (folder / "02.jpg").write_bytes(b"\xff\xd8two")
+    task = tasks.Task(
+        id="img1", text="x", out_dir=tmp_path, state=tasks.TaskState.done, mode="images",
+        path=folder, artifacts=[folder / "01.jpg", folder / "02.jpg"], _manager=isolated_home,
+    )
+    isolated_home.tasks[task.id] = task
+
+    assert client.get("/tasks/img1/artifact?index=1").content == b"\xff\xd8two"
+    assert client.get("/tasks/img1/artifact").content == b"\xff\xd8one"
+    assert client.get("/tasks/img1/artifact?index=2").status_code == 404
+
+    listing = client.get("/tasks").json()["tasks"][0]
+    assert listing["mode"] == "images"
+    assert len(listing["artifacts"]) == 2
+
+
+def test_task_file_on_directory_says_use_artifact_route(client, isolated_home, tmp_path: Path):
+    folder = tmp_path / "图集"
+    folder.mkdir()
+    task = tasks.Task(
+        id="img2", text="x", out_dir=tmp_path, state=tasks.TaskState.done, path=folder, _manager=isolated_home,
+    )
+    isolated_home.tasks[task.id] = task
+    resp = client.get("/tasks/img2/file")
+    assert resp.status_code == 409
+    assert "artifact" in resp.json()["detail"]

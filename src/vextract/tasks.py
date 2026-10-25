@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import config, download, registry
 from .errors import Cancelled, VextractError
-from .models import MediaInfo
+from .models import AudioFormat, MediaInfo, Mode, TranscriptFormat
 
 MAX_TASKS = 200
 
@@ -28,12 +28,32 @@ class TaskState(StrEnum):
     resolving = "resolving"
     downloading = "downloading"
     merging = "merging"
+    processing = "processing"
+    """转码 / 本地转录这类"下载之后还要再算一步"的阶段。"""
     done = "done"
     error = "error"
     cancelled = "cancelled"
 
 
 TERMINAL = {TaskState.done, TaskState.error, TaskState.cancelled}
+
+
+def _size_of(path: Path) -> int:
+    """图集任务的产物是目录：目录本身的 st_size 是目录项大小，不是作品体积。"""
+    if path.is_dir():
+        return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+    return path.stat().st_size
+
+
+def _stage_state(stage: str) -> TaskState | None:
+    """进度阶段 → 任务状态（前端顶部那颗状态胶囊）。"""
+    if stage.startswith("下载"):
+        return TaskState.downloading
+    if stage == "合并":
+        return TaskState.merging
+    if stage in ("转码", "转录"):
+        return TaskState.processing
+    return None
 
 
 @dataclass
@@ -44,10 +64,19 @@ class Task:
     quality: str = "best"
     stream_index: int | None = None
     filename: str | None = None
+    mode: Mode | None = None
+    audio_format: AudioFormat = "m4a"
+    embed_tags: bool = True
+    transcribe: bool = False
+    transcript_format: TranscriptFormat = "md"
+    asr_model: str | None = None
+    asr_language: str | None = None
     state: TaskState = TaskState.queued
     progress: dict = field(default_factory=lambda: download.Progress(stage="排队").to_dict())
     media: MediaInfo | None = None
     path: Path | None = None
+    artifacts: list[Path] = field(default_factory=list)
+    """主产物之外的文件：图集的每张图、转录出的文字稿。"""
     size: int | None = None
     error: dict | None = None
     created_at: float = field(default_factory=time.time)
@@ -64,9 +93,14 @@ class Task:
             "quality": self.quality,
             "stream_index": self.stream_index,
             "filename": self.filename,
+            "mode": self.mode,
+            "audio_format": self.audio_format,
+            "transcribe": self.transcribe,
+            "transcript_format": self.transcript_format,
             "out_dir": str(self.out_dir),
             "media": self.media.model_dump() if self.media else None,
             "path": str(self.path) if self.path else None,
+            "artifacts": [str(item) for item in self.artifacts],
             "size": self.size,
             "error": self.error,
             "created_at": self.created_at,
@@ -106,7 +140,12 @@ class TaskManager:
                 text=row.get("text") or "",
                 out_dir=Path(row.get("out_dir") or config.settings.out_dir),
                 state=TaskState(row.get("state") or "done"),
+                mode=row.get("mode"),
+                audio_format=row.get("audio_format") or "m4a",
+                transcribe=bool(row.get("transcribe")),
+                transcript_format=row.get("transcript_format") or "md",
                 path=Path(row["path"]) if row.get("path") else None,
+                artifacts=[Path(item) for item in (row.get("artifacts") or [])],
                 size=row.get("size"),
                 error=row.get("error"),
                 created_at=row.get("created_at") or time.time(),
@@ -138,7 +177,12 @@ class TaskManager:
                 "text": task.text[:200],
                 "out_dir": str(task.out_dir),
                 "state": task.state.value,
+                "mode": task.mode,
+                "audio_format": task.audio_format,
+                "transcribe": task.transcribe,
+                "transcript_format": task.transcript_format,
                 "path": str(task.path) if task.path else None,
+                "artifacts": [str(item) for item in task.artifacts],
                 "size": task.size,
                 "error": task.error,
                 "created_at": task.created_at,
@@ -157,6 +201,13 @@ class TaskManager:
         quality: str = "best",
         stream_index: int | None = None,
         filename: str | None = None,
+        mode: Mode | None = None,
+        audio_format: AudioFormat = "m4a",
+        embed_tags: bool = True,
+        transcribe: bool = False,
+        transcript_format: TranscriptFormat = "md",
+        asr_model: str | None = None,
+        asr_language: str | None = None,
     ) -> Task:
         task = Task(
             id=uuid.uuid4().hex[:12],
@@ -165,6 +216,13 @@ class TaskManager:
             quality=quality,
             stream_index=stream_index,
             filename=filename,
+            mode=mode,
+            audio_format=audio_format,
+            embed_tags=embed_tags,
+            transcribe=transcribe,
+            transcript_format=transcript_format,
+            asr_model=asr_model,
+            asr_language=asr_language,
             _manager=self,
         )
         self.tasks[task.id] = task
@@ -230,10 +288,9 @@ class TaskManager:
     async def _run(self, task: Task) -> None:
         def progress_cb(progress: download.Progress) -> None:
             task.progress = progress.to_dict()
-            if progress.stage.startswith("下载"):
-                task.state = TaskState.downloading
-            elif progress.stage == "合并":
-                task.state = TaskState.merging
+            state = _stage_state(progress.stage)
+            if state:
+                task.state = state
             task.publish("progress")
 
         try:
@@ -251,11 +308,19 @@ class TaskManager:
                 quality=task.quality,
                 stream_index=task.stream_index,
                 filename=task.filename,
+                mode=task.mode,
+                audio_format=task.audio_format,
+                embed_tags=task.embed_tags,
+                transcribe=task.transcribe,
+                transcript_format=task.transcript_format,
+                asr_model=task.asr_model,
+                asr_language=task.asr_language,
                 progress=progress_cb,
                 cancel=lambda: task.cancel_requested,
+                on_artifact=task.artifacts.append,
             )
             task.path = path
-            task.size = path.stat().st_size
+            task.size = _size_of(path)
             task.state = TaskState.done
             task.progress = download.Progress(stage="完成", overall=1.0, message=str(path)).to_dict()
         except Cancelled as exc:

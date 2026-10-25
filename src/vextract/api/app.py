@@ -12,11 +12,12 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import shutil
 import socket
 import subprocess
 import sys
 from contextlib import asynccontextmanager
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from urllib.parse import quote
 from urllib.parse import urlparse as parse_url
 
@@ -26,8 +27,9 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import capabilities, config, cookies, download, engine, registry
+from .. import asr, capabilities, config, cookies, download, engine, registry
 from ..errors import VextractError
+from ..models import AudioFormat, Mode, TranscriptFormat
 from ..tasks import TERMINAL, manager
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -48,7 +50,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="vextract", version="0.2.0", description="自媒体视频提取 API + 前端", lifespan=lifespan)
+app = FastAPI(title="vextract", version="0.3.0", description="自媒体视频提取 API + 前端", lifespan=lifespan)
 
 
 class ExtractRequest(BaseModel):
@@ -62,6 +64,13 @@ class TaskRequest(BaseModel):
     stream_index: int | None = None
     filename: str | None = None
     out_dir: str | None = None
+    mode: Mode | None = Field(default=None, description="video / audio / images；留空按内容推断")
+    audio_format: AudioFormat = "m4a"
+    embed_tags: bool = True
+    transcribe: bool = Field(default=False, description="音频落盘后再跑本地 ASR 出文字稿")
+    transcript_format: TranscriptFormat = "md"
+    asr_model: str | None = None
+    asr_language: str | None = None
 
 
 class SettingsPatchModel(config.SettingsPatch):
@@ -108,6 +117,8 @@ async def doctor() -> dict:
         "ok": bool(download.ffmpeg_path()),
         "yt_dlp": version,
         "ffmpeg": download.ffmpeg_path(),
+        "ffprobe": shutil.which("ffprobe"),
+        "asr": asr.describe(),
         "python": sys.version.split()[0],
         "out_dir": str(config.settings.out_dir),
         "cookie_dir": str(config.settings.cookie_dir),
@@ -159,6 +170,13 @@ async def create_task(payload: TaskRequest) -> dict:
         quality=payload.quality,
         stream_index=payload.stream_index,
         filename=payload.filename,
+        mode=payload.mode,
+        audio_format=payload.audio_format,
+        embed_tags=payload.embed_tags,
+        transcribe=payload.transcribe,
+        transcript_format=payload.transcript_format,
+        asr_model=payload.asr_model,
+        asr_language=payload.asr_language,
     )
     return task.serialize()
 
@@ -209,7 +227,32 @@ async def task_file(task_id: str, request: Request, attachment: int = 0):
     task = manager.get(task_id)
     if not task or not task.path or not task.path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
+    if task.path.is_dir():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"这个任务的产物是目录（{task.path.name}）："
+                f"用 /tasks/{task_id}/artifact?index=N 取单张，或「在访达中显示」"
+            ),
+        )
     return _file_response(task.path, request, as_attachment=bool(attachment))
+
+
+@app.get("/tasks/{task_id}/artifact")
+async def task_artifact(task_id: str, request: Request, index: int = 0, attachment: int = 0):
+    """主产物之外的文件：图集的第 N 张图（index 从 0 起）、转录出的文字稿。
+
+    图集任务的 path 是目录，不能走 /file——这条路由就是给它们用的。
+    """
+    task = manager.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if not 0 <= index < len(task.artifacts):
+        raise HTTPException(status_code=404, detail=f"没有第 {index} 个附加文件（共 {len(task.artifacts)} 个）")
+    target = task.artifacts[index]
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"文件已不在：{target}")
+    return _file_response(target, request, as_attachment=bool(attachment))
 
 
 @app.get("/events")
@@ -274,6 +317,13 @@ async def download_endpoint(payload: TaskRequest) -> dict:
         quality=payload.quality,
         stream_index=payload.stream_index,
         filename=payload.filename,
+        mode=payload.mode,
+        audio_format=payload.audio_format,
+        embed_tags=payload.embed_tags,
+        transcribe=payload.transcribe,
+        transcript_format=payload.transcript_format,
+        asr_model=payload.asr_model,
+        asr_language=payload.asr_language,
     )
     return {"path": str(path), "size": path.stat().st_size, "media": media.model_dump()}
 
@@ -314,19 +364,38 @@ def _reject_private_host(host: str) -> None:
             raise HTTPException(status_code=400, detail="拒绝访问本机/链路本地地址")
 
 
+_MEDIA_TYPES = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".flac": "audio/flac",
+    ".wav": "audio/wav",
+    ".aac": "audio/aac",
+    ".ogg": "audio/ogg",
+    ".webm": "video/webm",
+    ".flv": "video/x-flv",
+    ".ts": "video/mp2t",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".heic": "image/heic",
+    ".md": "text/markdown; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".srt": "application/x-subrip; charset=utf-8",
+}
+
+
 def _media_type(path: Path) -> str:
-    return {
-        ".mp4": "video/mp4",
-        ".m4a": "audio/mp4",
-        ".mp3": "audio/mpeg",
-        ".webm": "video/webm",
-        ".flv": "video/x-flv",
-        ".ts": "video/mp2t",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png": "image/png",
-        ".webp": "image/webp",
-    }.get(PurePosixPath(path.suffix.lower()).suffix, "application/octet-stream")
+    """按扩展名给 Content-Type。
+
+    这里踩过一次：早先写的是 `PurePosixPath(path.suffix.lower()).suffix`——把 ".jpg"
+    当成路径再取一次后缀，结果永远拿到空串，**所有文件都发成 application/octet-stream**
+    （视频内嵌播放、音频试听、图片预览全靠浏览器猜类型）。直接用一次 suffix 就好。
+    """
+    return _MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream")
 
 
 def _file_response(path: Path, request: Request, *, as_attachment: bool = False):

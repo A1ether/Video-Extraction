@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from . import cookies
+from . import config, cookies
 from .errors import RateLimited, UpstreamChanged
 
 DESKTOP_UA = (
@@ -23,6 +23,48 @@ DEFAULT_HEADERS = {
 }
 
 
+def browser_cookies(platform: str) -> httpx.Cookies | None:
+    """从用户本机浏览器只读取这个平台的 cookie（只读，不写、不落盘、不打印）。
+
+    为什么需要它：设置页的「从浏览器读取 cookie」原先只传给 yt-dlp，
+    自研 provider（B站/抖音/小红书…）走的是这个 httpx 工厂，根本读不到——
+    于是"登录后才有的东西"（B站 CC 字幕、高码率）对只用浏览器登录的用户不可达。
+    """
+    source = config.settings.cookies_from_browser
+    if not source:
+        return None
+    try:
+        from yt_dlp.cookies import extract_cookies_from_browser
+    except ImportError:
+        return None
+    try:
+        jar = extract_cookies_from_browser(source)
+    except Exception:  # noqa: BLE001 — 浏览器没装/库被锁/钥匙串拒绝，都当作"没有"
+        return None
+
+    wanted = {
+        "bilibili": (".bilibili.com", "bilibili.com"),
+        "douyin": (".douyin.com", "douyin.com"),
+        "xhs": (".xiaohongshu.com", "xiaohongshu.com"),
+        "kuaishou": (".kuaishou.com", "kuaishou.com"),
+        "weibo": (".weibo.com", "weibo.com", ".weibo.cn"),
+    }.get(platform, ())
+    if not wanted:
+        return None
+
+    out = httpx.Cookies()
+    found = 0
+    for cookie in jar:
+        domain = (cookie.domain or "").lstrip(".").lower()
+        if not domain:
+            continue
+        if not any(domain == item.lstrip(".") or domain.endswith("." + item.lstrip(".")) for item in wanted):
+            continue
+        out.set(cookie.name, cookie.value or "", domain=domain, path=cookie.path or "/")
+        found += 1
+    return out if found else None
+
+
 def client(
     platform: str,
     *,
@@ -35,7 +77,8 @@ def client(
         hdrs["User-Agent"] = MOBILE_UA
     if headers:
         hdrs.update(headers)
-    jar = cookies.httpx_cookies(platform)
+    # 优先用 L1 文件；没有文件再看设置里的"从浏览器读取"（L2）
+    jar = cookies.httpx_cookies(platform) or browser_cookies(platform)
     return httpx.AsyncClient(
         headers=hdrs,
         cookies=jar,

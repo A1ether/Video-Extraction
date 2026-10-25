@@ -43,8 +43,10 @@ const fmtAge = (ts) => {
 };
 
 const PLATFORM_LABEL = { bilibili: "B站", weibo: "微博", kuaishou: "快手", xhs: "小红书", douyin: "抖音", youtube: "YouTube", tiktok: "TikTok", generic: "其他" };
-const STATE_LABEL = { queued: "排队中", resolving: "解析中", downloading: "下载中", merging: "合并中", done: "已完成", error: "失败", cancelled: "已取消" };
-const STATE_CLASS = { queued: "pill-muted", resolving: "pill-accent", downloading: "pill-accent", merging: "pill-accent", done: "pill-ok", error: "pill-err", cancelled: "pill-warn" };
+const STATE_LABEL = { queued: "排队中", resolving: "解析中", downloading: "下载中", merging: "合并中", processing: "处理中", done: "已完成", error: "失败", cancelled: "已取消" };
+const STATE_CLASS = { queued: "pill-muted", resolving: "pill-accent", downloading: "pill-accent", merging: "pill-accent", processing: "pill-accent", done: "pill-ok", error: "pill-err", cancelled: "pill-warn" };
+const IMAGE_EXT = /\.(jpe?g|png|webp|gif|heic|avif)$/i;
+const TEXT_EXT = /\.(md|txt|srt)$/i;
 
 let toastSeq = 0;
 function toast(message, kind = "info", timeout = 4200) {
@@ -195,6 +197,8 @@ function coverPlaceholder(data) {
 
 function renderMedia(data) {
   const rows = streamRows(data);
+  const assets = data.assets || [];
+  const isImagePost = rows.length === 0 && assets.length > 0;
   const best = rows.findIndex((s) => !s.audio_only);
   const cover = data.cover_url
     ? el("img", { class: "cover", src: `/proxy/image?url=${encodeURIComponent(data.cover_url)}`, alt: "封面", loading: "lazy", onerror: (e) => e.target.replaceWith(coverPlaceholder(data)) })
@@ -230,17 +234,68 @@ function renderMedia(data) {
     tbody.append(tr);
   });
   table.append(tbody);
+  const tableWrap = el("div", { class: "table-wrap" }, table);
 
   const filename = el("input", { type: "text", placeholder: "文件名（留空自动生成：作者_标题_ID）" });
   const outDir = el("input", { type: "text", placeholder: "输出目录", value: settings.out_dir || "" });
 
-  const downloadBtn = el("button", { class: "btn primary", type: "button", text: "下载" }, null);
+  /* ---------- 产物模式：视频 / 仅音频 / 图集 ---------- */
+  const modeSelect = el("select", { id: "dl-mode", title: "要下载什么" }, [
+    el("option", { value: "video", text: "视频" }),
+    el("option", { value: "audio", text: "仅音频" }),
+    el("option", { value: "images", text: "图集（图文作品）" }),
+  ]);
+  modeSelect.value = isImagePost ? "images" : "video";
+  if (!rows.length) modeSelect.querySelector('option[value="video"]').disabled = "disabled";
+  if (!assets.length) modeSelect.querySelector('option[value="images"]').disabled = "disabled";
+
+  const audioFormat = el("select", {}, (settings.audio_formats || ["m4a", "mp3", "flac"]).map((name) => el("option", { value: name, text: name })));
+  audioFormat.value = settings.audio_format || "m4a";
+  const transcriptFormat = el("select", {}, (settings.transcript_formats || ["md", "txt", "srt"]).map((name) => el("option", { value: name, text: name })));
+  transcriptFormat.value = settings.transcript_format || "md";
+  const transcribeBox = el("input", { type: "checkbox", style: "width:auto" });
+  if (!asrReady()) {
+    transcribeBox.disabled = "disabled";
+    transcribeBox.title = "没装本地转录依赖：uv sync --extra transcribe";
+  }
+  const audioTools = el("div", { class: "row wrap gap8 hidden" }, [
+    el("span", { class: "muted", text: "格式" }), audioFormat,
+    el("label", { class: "row gap6", style: "cursor:pointer" }, [transcribeBox, el("span", { text: "本地转录出文字稿" })]),
+    el("span", { class: "muted", text: "文字稿" }), transcriptFormat,
+  ]);
+
+  const grid = el("div", { class: "image-grid hidden" });
+  assets.forEach((asset) => {
+    grid.append(el("figure", { class: "shot" }, [
+      el("img", { src: `/proxy/image?url=${encodeURIComponent(asset.url)}`, alt: `第 ${asset.index} 张`, loading: "lazy", onerror: (e) => e.target.closest("figure").classList.add("is-broken") }),
+      el("figcaption", { class: "muted", text: asset.width && asset.height ? `${asset.index}. ${asset.width}×${asset.height}` : `${asset.index}.${asset.ext}` }),
+    ]));
+  });
+
+  const downloadBtn = el("button", { class: "btn primary", type: "button", text: "下载视频" }, null);
+  const syncMode = () => {
+    const mode = modeSelect.value;
+    tableWrap.classList.toggle("hidden", mode !== "video");
+    audioTools.classList.toggle("hidden", mode !== "audio");
+    grid.classList.toggle("hidden", mode !== "images");
+    downloadBtn.textContent = mode === "audio" ? "下载音频" : (mode === "images" ? "下载图集" : "下载视频");
+  };
+  modeSelect.addEventListener("change", syncMode);
+
   downloadBtn.addEventListener("click", async () => {
+    const mode = modeSelect.value;
+    const label = downloadBtn.textContent;
     downloadBtn.disabled = true;
     downloadBtn.textContent = "创建任务…";
     try {
-      const body = { text: $("#share-text").value.trim() };
-      if (selectedIndex !== null) body.stream_index = selectedIndex + 1;   // 后端行号是 1-based
+      const body = { text: $("#share-text").value.trim(), mode };
+      // 行号只在视频模式传：音频模式选的是"最优音轨"，图集模式没有码流概念
+      if (mode === "video" && selectedIndex !== null) body.stream_index = selectedIndex + 1;   // 后端行号是 1-based
+      if (mode === "audio") {
+        body.audio_format = audioFormat.value;
+        body.transcribe = transcribeBox.checked;
+        body.transcript_format = transcriptFormat.value;
+      }
       if (filename.value.trim()) body.filename = filename.value.trim();
       if (outDir.value.trim()) body.out_dir = outDir.value.trim();
       const task = await api("/tasks", { method: "POST", body });
@@ -252,7 +307,7 @@ function renderMedia(data) {
       toast(`${err.code || "创建任务失败"}：${err.message || ""}`, "error");
     } finally {
       downloadBtn.disabled = false;
-      downloadBtn.textContent = "下载";
+      downloadBtn.textContent = label;
     }
   });
 
@@ -263,22 +318,32 @@ function renderMedia(data) {
         el("h3", { text: data.title }),
         el("div", { class: "row wrap gap8" }, [
           el("span", { class: "pill pill-accent", text: PLATFORM_LABEL[data.platform] || data.platform }),
+          el("span", { class: "pill pill-muted", text: isImagePost ? "图文作品" : "视频作品" }),
           data.author ? el("span", { class: "muted", text: `@${data.author}` }) : null,
           el("span", { class: "muted", text: fmtDuration(data.duration) }),
-          el("span", { class: "muted", text: `${rows.length} 条码流` }),
+          el("span", { class: "muted", text: isImagePost ? `${assets.length} 张图` : `${rows.length} 条码流` }),
         ]),
         el("div", { class: "media-stats" }, stats),
         data.quality_note ? el("p", { class: "hint", text: data.quality_note }) : null,
       ]),
     ]),
-    el("div", { class: "table-wrap" }, table),
+    el("div", { class: "row wrap gap8 mode-row" }, [
+      el("span", { class: "muted", text: "产物" }), modeSelect,
+      el("span", { class: "spacer" }),
+      el("span", { class: "muted", text: `共 ${rows.length + assets.length} 项` }),
+    ]),
+    tableWrap,
+    audioTools,
+    grid,
     el("div", { class: "row wrap gap8", style: "margin-top:12px" }, [filename, outDir, downloadBtn]),
     data.needs_merge ? el("p", { class: "hint", text: "该平台音视频分离，下载时会自动调用 ffmpeg 无损合并（-c copy）。" }) : null,
+    isImagePost ? el("p", { class: "hint", text: "图文作品会下载成同名文件夹（01.jpg / 02.jpg …），每张取最高分辨率档；元数据不参与命名。" }) : null,
   ]);
 
   const result = $("#extract-result");
   result.replaceChildren(card);
   result.classList.remove("hidden");
+  syncMode();
 }
 
 /* ---------- 任务列表（原地更新，避免重渲染打断播放） ---------- */
@@ -300,6 +365,7 @@ function taskRow() {
   const errorBox = el("div", { class: "task-error hidden" });
   const actions = el("div", { class: "task-actions" });
   const player = el("div", { class: "hidden" });
+  const artifacts = el("div", { class: "artifacts hidden" });
 
   const root = el("div", { class: "task" }, [
     el("div", { class: "task-head" }, [platform, title, el("span", { class: "spacer" }), created, state]),
@@ -307,10 +373,11 @@ function taskRow() {
     el("div", { class: "task-meta" }, [stage, speed, size]),
     errorBox,
     player,
+    artifacts,
     actions,
   ]);
 
-  return { root, refs: { bar, progress, stage, speed, size, state, title, platform, created, errorBox, actions, player } };
+  return { root, refs: { bar, progress, stage, speed, size, state, title, platform, created, errorBox, actions, player, artifacts } };
 }
 
 function upsertTask(task) {
@@ -357,16 +424,54 @@ function paintTask(task, row) {
     refs.errorBox.classList.add("hidden");
   }
 
+  const artifacts = artifactNodes(task);
+  refs.artifacts.replaceChildren(...artifacts);
+  refs.artifacts.classList.toggle("hidden", artifacts.length === 0);
+
   refs.actions.replaceChildren(...taskActions(task));
+}
+
+function artifactNodes(task) {
+  /* 主产物之外的成果：图集的每张图（缩略图点开大图）、转录出的文字稿（直接保存）。 */
+  const items = task.artifacts || [];
+  if (!items.length) return [];
+  const nodes = [];
+  const shots = items.map((path, index) => ({ path, index })).filter((item) => IMAGE_EXT.test(item.path));
+  if (shots.length) {
+    const grid = el("div", { class: "image-grid" });
+    for (const { path, index } of shots) {
+      const name = path.split("/").pop();
+      grid.append(el("a", {
+        class: "shot", href: `/tasks/${task.id}/artifact?index=${index}`, target: "_blank", rel: "noreferrer", title: name,
+      }, el("img", { src: `/tasks/${task.id}/artifact?index=${index}`, alt: name, loading: "lazy" })));
+    }
+    nodes.push(
+      grid,
+      el("p", { class: "hint", text: `${shots.length} 张图已存进文件夹：${(task.path || "").split("/").pop()}（点缩略图看原图）` }),
+    );
+  }
+  const docs = items.map((path, index) => ({ path, index })).filter((item) => TEXT_EXT.test(item.path));
+  if (docs.length) {
+    const row = el("div", { class: "row wrap gap8" });
+    for (const { path, index } of docs) {
+      row.append(el("a", {
+        class: "btn sm", href: `/tasks/${task.id}/artifact?index=${index}&attachment=1`,
+        text: `保存文字稿 · ${path.split(".").pop()}`,
+      }));
+    }
+    nodes.push(row);
+  }
+  return nodes;
 }
 
 function taskActions(task) {
   const buttons = [];
-  const done = task.state === "done" || (task.path && task.state !== "error");
+  const isImageTask = task.mode === "images" || (task.artifacts || []).some((path) => IMAGE_EXT.test(path));
 
-  if (task.state === "done" && task.path) {
+  if (task.state === "done" && task.path && !isImageTask) {
+    const isAudio = /\.[a-z0-9]+$/i.test(task.path) && /(\.m4a|\.mp3|\.flac|\.wav|\.aac|\.ogg)$/i.test(task.path);
     buttons.push(el("button", {
-      class: "btn sm", type: "button", text: openPlayers.has(task.id) ? "收起播放" : "播放",
+      class: "btn sm", type: "button", text: openPlayers.has(task.id) ? "收起播放" : (isAudio ? "试听" : "播放"),
       onclick: () => {
         const row = rows.get(task.id);
         const { player } = row.refs;
@@ -376,15 +481,23 @@ function taskActions(task) {
           player.replaceChildren();
         } else {
           openPlayers.add(task.id);
-          player.replaceChildren(el("video", { controls: "", preload: "metadata", src: `/tasks/${task.id}/file` }));
+          player.replaceChildren(el(isAudio ? "audio" : "video", { controls: "", preload: "metadata", src: `/tasks/${task.id}/file` }));
           player.classList.remove("hidden");
         }
         paintTask(task, row);
       },
     }));
     buttons.push(el("a", { class: "btn sm", href: `/tasks/${task.id}/file?attachment=1`, text: "保存文件" }));
+  }
+
+  if (task.state === "done" && task.path && isImageTask) {
+    const first = (task.artifacts || []).findIndex((path) => IMAGE_EXT.test(path));
+    if (first >= 0) buttons.push(el("a", { class: "btn sm", href: `/tasks/${task.id}/artifact?index=${first}`, target: "_blank", rel: "noreferrer", text: "看第一张" }));
+  }
+
+  if (task.state === "done" && task.path) {
     buttons.push(el("button", {
-      class: "btn sm", type: "button", text: "在访达中显示",
+      class: "btn sm", type: "button", text: isImageTask ? "打开文件夹" : "在访达中显示",
       onclick: async () => {
         try {
           const res = await api(`/tasks/${task.id}/reveal`, { method: "POST" });
@@ -411,7 +524,12 @@ function taskActions(task) {
         try {
           const next = await api("/tasks", {
             method: "POST",
-            body: { text: task.text, quality: task.quality, stream_index: task.stream_index, filename: task.filename, out_dir: task.out_dir },
+            body: {
+              text: task.text, quality: task.quality, stream_index: task.stream_index,
+              filename: task.filename, out_dir: task.out_dir,
+              mode: task.mode, audio_format: task.audio_format,
+              transcribe: task.transcribe, transcript_format: task.transcript_format,
+            },
           });
           upsertTask(next);
           toast("已重试", "ok");
@@ -519,6 +637,8 @@ function startProgressChannel() {
 
 /* ---------- 平台 / 自检 / 设置 ---------- */
 let settings = {};
+let doctor = {};                     // /doctor 的原始数据（含 ASR 可用性）
+const asrReady = () => Boolean(doctor.asr && (doctor.asr.available || []).length);
 
 async function loadPlatforms() {
   try {
@@ -544,16 +664,27 @@ async function loadPlatforms() {
 async function loadDoctor() {
   try {
     const data = await api("/doctor");
+    doctor = data;
     const grid = el("div", { class: "grid" });
     const kv = (k, v) => el("div", { class: "kv" }, [el("span", { text: k }), el("span", { text: v ?? "—" })]);
+    const asr = data.asr || {};
     grid.append(
       kv("yt-dlp", data.yt_dlp),
       kv("ffmpeg", data.ffmpeg || "未找到（B站/YouTube 无法合并）"),
+      kv("ffprobe", data.ffprobe || "未找到（仅音频模式会退回「总是转码」，仍能出文件）"),
+      kv("本地转录", (asr.available || []).length ? `${asr.available.join("/")} · 默认模型 ${asr.model}` : "未安装（uv sync --extra transcribe）"),
       kv("Python", data.python),
       kv("输出目录", data.out_dir),
       kv("provider 顺序", (data.providers || []).join(" → ")),
     );
     $("#doctor-grid").replaceChildren(grid);
+    const status = $("#asr-status");
+    if (status) {
+      status.textContent = asrReady()
+        ? `本地转录就绪：${asr.available.join("/")}（模型 ${asr.model}）`
+        : "本地转录未安装：uv sync --extra transcribe 之后刷新本页即可勾选。";
+      status.className = asrReady() ? "hint" : "hint warn";
+    }
     const pill = $("#engine-pill");
     pill.textContent = data.ffmpeg ? `引擎 ${data.yt_dlp} · ffmpeg 就绪` : "ffmpeg 缺失";
     pill.className = `pill ${data.ffmpeg ? "pill-ok" : "pill-err"}`;
@@ -579,6 +710,13 @@ async function loadSettings() {
   $("#set-out-dir").value = settings.out_dir || "";
   $("#set-home").textContent = settings.home || "";
   $("#set-realtime").checked = settings.realtime !== false;
+  $("#set-embed-tags").checked = settings.embed_tags !== false;
+  $("#set-asr-model").value = settings.asr_model || "";
+  $("#set-asr-language").value = settings.asr_language || "";
+  const audioSelect = $("#set-audio-format");
+  audioSelect.replaceChildren(...(settings.audio_formats || ["m4a"]).map((name) => el("option", { value: name, text: name, selected: settings.audio_format === name ? "selected" : null })));
+  const transcriptSelect = $("#set-transcript-format");
+  transcriptSelect.replaceChildren(...(settings.transcript_formats || ["md"]).map((name) => el("option", { value: name, text: name, selected: settings.transcript_format === name ? "selected" : null })));
   const select = $("#set-browser");
   select.replaceChildren(...(settings.browser_choices || [""]).map((name) =>
     el("option", { value: name, text: name || "不读取浏览器 cookie", selected: (settings.cookies_from_browser || "") === name ? "selected" : null })));
@@ -593,6 +731,11 @@ $("#btn-save-settings").addEventListener("click", async () => {
         out_dir: $("#set-out-dir").value.trim(),
         cookies_from_browser: $("#set-browser").value,
         realtime: wantRealtime,
+        audio_format: $("#set-audio-format").value,
+        transcript_format: $("#set-transcript-format").value,
+        embed_tags: $("#set-embed-tags").checked,
+        asr_model: $("#set-asr-model").value.trim(),
+        asr_language: $("#set-asr-language").value.trim(),
       },
     });
     toast("设置已保存", "ok");

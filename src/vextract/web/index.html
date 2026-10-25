@@ -97,6 +97,29 @@
     </div>
 
     <div class="card">
+      <h2>音频与文字稿</h2>
+      <div class="row wrap gap8">
+        <label class="field-label" for="set-audio-format">仅音频格式</label>
+        <select id="set-audio-format"></select>
+        <label class="field-label" for="set-transcript-format">文字稿格式</label>
+        <select id="set-transcript-format"></select>
+      </div>
+      <div class="row wrap gap8">
+        <label class="field-label" for="set-asr-model">ASR 模型</label>
+        <input id="set-asr-model" type="text" spellcheck="false" placeholder="留空用后端默认">
+        <label class="field-label" for="set-asr-language">语言</label>
+        <input id="set-asr-language" type="text" spellcheck="false" placeholder="zh / en（留空自动）">
+      </div>
+      <label class="row gap8" style="cursor:pointer">
+        <input id="set-embed-tags" type="checkbox" style="width:auto">
+        <span>把标题/作者/来源写进音频标签</span>
+      </label>
+      <p class="hint" id="asr-status"></p>
+      <p class="hint">本地转录需要一个可选依赖（离线、不上传任何内容）：<code>uv sync --extra transcribe</code>，
+        Apple Silicon 走 mlx-whisper。首次转录会下载模型权重（默认 large-v3-turbo 约 1.6GB）。</p>
+    </div>
+
+    <div class="card">
       <h2>进度推送</h2>
       <label class="row gap8" style="cursor:pointer">
         <input id="set-realtime" type="checkbox" style="width:auto">
@@ -110,9 +133,10 @@
       <h2>怎么用</h2>
       <ol class="hint list">
         <li>把分享链接贴进「提取」，点<b>解析</b>，确认标题/作者/码流没错。</li>
-        <li>选清晰度（默认最高），可改文件名与输出目录，点<b>下载</b>。</li>
-        <li>在「任务」里看实时进度；B站/YouTube 会有「合并」阶段（ffmpeg 无损合并音视频）。</li>
-        <li>完成后可直接在页面里播放、下载文件或在访达中定位。</li>
+        <li>选产物模式：<b>视频</b>（可选清晰度）/ <b>仅音频</b>（m4a·mp3·flac，可勾本地转录）/ <b>图集</b>（图文作品，下载成同名文件夹）。</li>
+        <li>可改文件名与输出目录，点<b>下载</b>。</li>
+        <li>在「任务」里看实时进度；B站/YouTube 有「合并」阶段，仅音频有「转码」「转录」阶段。</li>
+        <li>完成后可直接在页面里播放、看文字稿、打开图集、下载文件或在访达中定位。</li>
       </ol>
     </div>
   </section>

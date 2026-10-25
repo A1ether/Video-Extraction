@@ -181,6 +181,22 @@ td.num { font-variant-numeric: tabular-nums; }
 }
 .kv span:last-child { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ---------- 产物模式 / 图集 ---------- */
+.mode-row { margin: 12px 0 10px; }
+.mode-row select { min-width: 150px; }
+.image-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px; margin-top: 10px;
+}
+.shot {
+  display: block; margin: 0; text-decoration: none; color: inherit;
+  border: 1px solid var(--border); border-radius: 9px; overflow: hidden; background: var(--bg);
+}
+.shot img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; background: var(--bg); }
+.shot figcaption { padding: 4px 6px; font-size: 11px; }
+.shot.is-broken img { opacity: 0.25; }
+.hint.warn { color: var(--warn); }
+
 /* ---------- 任务 ---------- */
 .tasks { display: flex; flex-direction: column; gap: 12px; }
 .task { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
@@ -194,6 +210,8 @@ td.num { font-variant-numeric: tabular-nums; }
 .task-error { margin-top: 8px; padding: 8px 10px; border-radius: 9px; background: var(--err-soft); color: var(--err); font-size: 12px; white-space: pre-wrap; }
 .task-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .task video { width: 100%; max-height: 360px; margin-top: 10px; border-radius: 10px; background: #000; }
+.task audio { width: 100%; margin-top: 10px; }
+.task .artifacts { margin-top: 10px; }
 
 /* ---------- Toast ---------- */
 .toasts { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 50; }

@@ -102,3 +102,39 @@ def test_streams_default_to_highest_rank_in_js():
     """默认选中最高清晰度视频轨，而不是数组第一个。"""
     assert "audio_only" in JS
     assert "rank" in JS
+
+
+# ---------- 产物模式（音频 / 图集 / 转录）----------
+def test_mode_selector_offers_all_three_modes():
+    assert "dl-mode" in JS
+    for mode in ("video", "audio", "images"):
+        assert f'value: "{mode}"' in JS, f"缺 {mode} 模式选项"
+    assert "isImagePost" in JS, "图文作品要能自动切到图集模式"
+
+
+def test_audio_controls_and_transcribe_toggle_exist():
+    for token in ("audio_format", "transcript_format", "transcribe", "audio_formats", "transcript_formats"):
+        assert token in JS, f"前端没接上 {token}"
+    assert "asrReady" in JS, "没装 ASR 依赖时转录勾选要禁用"
+
+
+def test_settings_panel_binds_audio_and_asr_fields():
+    for element in ("set-audio-format", "set-transcript-format", "set-asr-model", "set-asr-language", "set-embed-tags", "asr-status"):
+        assert f'id="{element}"' in INDEX, f"设置页缺 {element}"
+
+
+def test_artifact_urls_match_a_real_route():
+    routes = {(path, "GET") for path, method in _routes() if method == "GET"}
+    assert "/tasks/${task.id}/artifact?index=" in JS, "图集/文字稿要通过 /tasks/{id}/artifact 取"
+    assert (_normalize("/tasks/{task_id}/artifact"), "GET") in routes, "后端缺少 artifact 路由"
+
+
+def test_artifact_route_is_not_confused_with_file_route():
+    """图集任务的 path 是目录，/file 会 409——前端必须用 /artifact 拿单张。"""
+    assert "isImageTask" in JS
+    assert "artifact?index=" in JS
+
+
+def test_processing_state_is_labelled():
+    assert "processing" in JS, "转码/转录阶段要有自己的状态标签"
+    assert "处理中" in JS

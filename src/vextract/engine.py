@@ -7,6 +7,8 @@ yt-dlp 是同步 API，所以放进线程池，保持上游调用点是 async。
 from __future__ import annotations
 
 import asyncio
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from .errors import AuthRequired, DownloadFailed, NoMedia, UnsupportedUrl, UpstreamChanged
@@ -36,15 +38,43 @@ def _extract_sync(url: str, cookiefile: str | None, from_browser: str | None) ->
         "retries": 2,
         "extractor_args": {"bilibili": {"prefer_multi_flv": ["false"]}},
     }
+    snapshot = None
     if cookiefile:
+        # yt-dlp 的 cookie jar 在退出时会 save()，会**改写用户这份文件**（实测：一次运行就
+        # 把 70 条削成 66 条，丢掉 sdk_source_info / bit_env 这类它不认识的条目）。
+        # 我们的契约是"只读用户的 cookie"，所以给它一份临时副本，原文件一个字节都不动。
+        cookiefile, snapshot = _shadow_cookiefile(cookiefile)
         opts["cookiefile"] = cookiefile
     if from_browser:
         opts["cookiesfrombrowser"] = (from_browser, None, None, None)
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        if info is None:
-            raise UpstreamChanged("yt-dlp 未返回任何数据", hint="稍后重试或反馈该链接", detail=url)
-        return ydl.sanitize_info(info)
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if info is None:
+                raise UpstreamChanged("yt-dlp 未返回任何数据", hint="稍后重试或反馈该链接", detail=url)
+            return ydl.sanitize_info(info)
+    finally:
+        if snapshot is not None:
+            snapshot.unlink(missing_ok=True)
+
+
+def _shadow_cookiefile(source: str) -> tuple[str, Path]:
+    """把用户 cookie 复制到临时文件，交给 yt-dlp 随便改写；返回 (临时路径, 待删句柄)。"""
+    original = Path(source)
+    handle = tempfile.NamedTemporaryFile(  # noqa: SIM115 — 生命周期跨到调用方 finally
+        prefix="vx-cookies-", suffix=".txt", delete=False
+    )
+    try:
+        handle.write(original.read_bytes())
+        handle.flush()
+        handle.close()
+        shadow = Path(handle.name)
+        shadow.chmod(0o600)  # 里面有 cookie，别落成 0644
+    except OSError:
+        handle.close()
+        Path(handle.name).unlink(missing_ok=True)
+        raise
+    return str(shadow), shadow
 
 
 def _translate(exc: Exception, url: str) -> Exception:

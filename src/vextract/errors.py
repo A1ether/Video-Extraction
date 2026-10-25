@@ -96,3 +96,10 @@ class CookieExportInvalid(VextractError):
 
     code = "COOKIE_EXPORT_INVALID"
     http_status = 400
+
+
+class TranscribeFailed(VextractError):
+    """本地转录失败（模型跑不起来 / 识别结果为空）。"""
+
+    code = "TRANSCRIBE_FAILED"
+    http_status = 500

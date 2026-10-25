@@ -1,6 +1,6 @@
 [project]
 name = "vextract"
-version = "0.1.0"
+version = "0.3.0"
 description = "自媒体视频提取工具：分享链接/文本 → 无水印视频 + 元数据"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,6 +20,12 @@ dependencies = [
 
 [project.scripts]
 vx = "vextract.cli:app"
+
+[project.optional-dependencies]
+# 本地转录是可选的：不装也能用视频/音频/图集，装了才能 --transcribe。
+# 两者都是 MIT 许可（与项目依赖口径一致，见 README「许可证与合规」）。
+transcribe = ["faster-whisper>=1.0.0"]        # 跨平台、体积小（CTranslate2 推理）
+transcribe-mlx = ["mlx-whisper>=0.4.0; sys_platform == 'darwin'"]   # Apple Silicon 最快；连带 torch，实测 .venv 约 1.3GB
 
 [dependency-groups]
 dev = [

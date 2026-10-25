@@ -56,6 +56,23 @@ CAPABILITIES: list[dict[str, str]] = [
         "verified": "❌ yt-dlp 零覆盖；与常驻 TUN 代理冲突，留待 P2 独立服务",
     },
     {
+        "platform": "图文作品（微博/抖音/小红书）",
+        "resolver": "provider 的 assets 通道（不占码流表）",
+        "auth": "与视频同门槛",
+        "merge": "不需要（每张图独立落盘）",
+        "verified": (
+            "✅ 2026-10-25 微博实测 18 张图（pic_infos 7 档，按面积取 largest）；"
+            "抖音/小红书解析实现 + fixture 覆盖，线上正例待一条未失效链接"
+        ),
+    },
+    {
+        "platform": "本地转录（音频 → 文字稿）",
+        "resolver": "自研 asr.py（mlx-whisper / faster-whisper / whisper 级联）",
+        "auth": "不涉及平台登录态",
+        "merge": "需要 ffmpeg 先出音频（可选依赖另装）",
+        "verified": "✅ 2026-10-25 抖音 19.7s 样本端到端（音频 313KB + 文字稿 .md）；默认 large-v3-turbo 未下载实测",
+    },
+    {
         "platform": "其他 1700+ 站点",
         "resolver": "yt-dlp 兜底",
         "auth": "视站点",

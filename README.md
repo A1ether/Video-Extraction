@@ -1,11 +1,17 @@
 # vextract
 
-自媒体视频提取工具：**贴一个分享链接/分享文本，拿到无水印视频 + 元数据**。
+自媒体提取工具：**贴一个分享链接/分享文本，拿到的可以是视频、仅音频、图集，甚至文字稿**。
+
+- **视频**：无水印源文件 + 元数据（默认）
+- **仅音频**：m4a / mp3 / flac，源已经是目标编码时零重编码，可写入标题/作者标签
+- **图集**：图文作品的图片，落成 `01.jpg / 02.jpg …` 的同名文件夹
+- **本地转录**：音频 → 文字稿（md / txt / srt），完全离线、不依赖平台登录态
 
 覆盖 抖音 / 快手 / 小红书 / B站 / 微博 / YouTube / TikTok，以及 yt-dlp 支持的 1700+ 站点。
 
 > 技术选型与代码复用策略见 [`docs/01-技术调研与选型方案.md`](docs/01-技术调研与选型方案.md)，
-> 实现与验收记录见 [`docs/02-实现与验收.md`](docs/02-实现与验收.md)。
+> 实现与验收记录见 [`docs/02-实现与验收.md`](docs/02-实现与验收.md)，
+> 拓展能力（音频/图集/转录）的实测证据见 [`docs/03-拓展能力（音频·图集·本地转录）.md`](docs/03-拓展能力（音频·图集·本地转录）.md)。
 > 文档里的每条"支持/不支持"都带本机实测证据——本项目**不采信上游 README 的自述**。
 
 ![提取页](docs/screenshots/extract.png)
@@ -28,8 +34,8 @@ uv run vx serve        # 启动服务并自动打开浏览器
 
 | 页 | 功能 |
 |---|---|
-| **提取** | 粘贴/一键读剪贴板；识别平台；展示封面、标题、作者、时长、互动数；码流表（默认选最高清晰度，可改）；自定义文件名与输出目录；建下载任务 |
-| **任务** | 实时进度（阶段 + 字节 + 百分比）、取消、重试、**页面内播放**（支持拖动进度）、保存文件、在访达中定位、移除、清空已完成；历史落盘，重启仍在 |
+| **提取** | 粘贴/一键读剪贴板；识别平台；展示封面、标题、作者、时长、互动数；**产物模式（视频 / 仅音频 / 图集）**；码流表（默认选最高清晰度，可改）；音频格式与**本地转录**勾选；图文作品显示图集网格；自定义文件名与输出目录；建下载任务 |
+| **任务** | 实时进度（阶段 + 字节 + 百分比）、取消、重试、**页面内试听/播放**（支持拖动进度）、图集缩略图（点开原图）、保存文字稿、保存文件、在访达中定位、移除、清空已完成；历史落盘，重启仍在 |
 | **平台** | 能力矩阵（含本机实测状态）+ 环境自检（yt-dlp 版本、ffmpeg、cookie 就绪情况、provider 顺序） |
 | **设置** | 输出目录、从浏览器读取 cookie（chrome/edge/firefox/safari…）、实时推送开关（关掉改轮询） |
 
@@ -50,17 +56,49 @@ open "http://127.0.0.1:8787/?live=0"
 alias vxg='open "http://127.0.0.1:8787/?text=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.stdin.read()))")"'
 ```
 
+## 产物模式
+
+| 模式 | 产物 | 说明 |
+|---|---|---|
+| 视频 | `<作者>_<标题>_<ID>.mp4` | DASH 平台（B站/YouTube）自动 ffmpeg 无损合并 |
+| 仅音频 | `.m4a` / `.mp3` / `.flac` | DASH 平台直接下自带音轨；单文件 mp4 平台用 ffmpeg 抽。**源已是 aac 且要 m4a 时不重编码**；默认把标题/作者/原链接写进标签（`--no-tags` 关掉） |
+| 图集 | `<作者>_<标题>_<ID>/01.jpg…` | 图文作品（微博实测 18 张；抖音/小红书解析已实现、待线上正例） |
+| 本地转录 | `<同名>.md/.txt/.srt` | 音频落盘后跑本地 ASR；`--transcribe` 开启，需可选依赖（见下） |
+
+```bash
+# 只要音频（mp3）
+uv run vx get "<分享文本>" --mode audio --audio-format mp3
+# 音频 + 中文文字稿
+uv run vx get "<分享文本>" --mode audio --transcribe --asr-language zh
+# 图文作品（也可以不给 --mode：图文会自动推断成图集）
+uv run vx get "<图文分享文本>" --mode images
+```
+
+本地转录依赖是**可选**的，不装也能用其它模式：
+
+```bash
+uv sync --extra transcribe        # 跨平台、体积小（faster-whisper / CTranslate2）
+uv sync --extra transcribe-mlx    # Apple Silicon 最快；mlx-whisper 连带 torch，实测 .venv 约 1.3GB
+```
+
+模型权重首次使用会下载（默认 `large-v3-turbo` 约 1.6GB，`vx doctor` 会显示当前后端与模型）；
+国内可 `export HF_ENDPOINT=https://hf-mirror.com`。**字幕为什么不走平台**：国内平台的 CC 字幕是
+登录态产物（实测 B站匿名 `need_login_subtitle=true`、`subtitles=[]`；抖音 web 详情没有字幕轨），
+本地 ASR 反而与平台改版无关——证据见 docs/03。
+
 ## 命令行 / HTTP
 
 CLI 保留完整能力，适合批处理与调试：
 
 ```bash
-uv run vx doctor        # 自检：引擎版本 / ffmpeg / cookie
+uv run vx doctor        # 自检：引擎 / ffmpeg / ffprobe / cookie / 本地转录后端
 uv run vx platforms     # 平台能力矩阵
 uv run vx cookies import <导出文件> --platform douyin   # 把浏览器插件的导出落成 cookie 文件（Netscape / 0600）
 uv run vx cookies show douyin                           # 看当前用的是哪份（只列 cookie 名，不打印值）
-uv run vx info "<分享文本>"            # 只解析
+uv run vx info "<分享文本>"            # 只解析（图集会列出张数/尺寸）
 uv run vx get  "<分享文本>" -o ~/Downloads
+uv run vx get  "<分享文本>" --mode audio --transcribe    # 音频 + 本地文字稿
+uv run vx get  "<链接>" -q audio                        # -q audio 等同 --mode audio
 ```
 
 HTTP（前端用的就是这套）：
@@ -71,20 +109,26 @@ curl -s -X POST localhost:8787/extract -H 'content-type: application/json' \
   -d '{"text":"https://m.weibo.cn/detail/4189191225395228"}'
 curl -s -X POST localhost:8787/tasks   -H 'content-type: application/json' \
   -d '{"text":"<分享文本>","stream_index":1}'
+curl -s -X POST localhost:8787/tasks   -H 'content-type: application/json' \
+  -d '{"text":"<分享文本>","mode":"audio","audio_format":"mp3","transcribe":true,"transcript_format":"md"}'
+curl -s -X POST localhost:8787/tasks   -H 'content-type: application/json' \
+  -d '{"text":"<图文分享文本>","mode":"images"}'
 curl -N localhost:8787/events          # SSE：任务状态与进度
+curl -s -o 01.jpg 'localhost:8787/tasks/<id>/artifact?index=0'   # 图集的第 1 张
+curl -s -o 文字稿.md 'localhost:8787/tasks/<id>/artifact?index=0&attachment=1'  # 音频任务里的文字稿
 ```
 
 ## 平台能力（截至 2026-10-25 实测）
 
-| 平台 | 解析方式 | 鉴权 | 需要 ffmpeg 合并 |
-|---|---|---|---|
-| B站 | 自研（WBI 签名 + playurl） | 可选，SESSDATA 解锁 1080P+ | **是**（DASH 分离） |
-| 微博 | 自研（游客墙 + statuses/show） | 免登录 | 否 |
-| 快手 | 自研（移动页 `window.INIT_STATE`） | 公开作品免登录 | 否 |
-| 小红书 | 自研（`__INITIAL_STATE__`） | 需分享文本里的 `xsec_token` | 否 |
-| 抖音 | 自研（详情接口 + 本机算签名） | **需要一次浏览器身份 UIFID**，之后复用 | 否 |
-| YouTube/TikTok | yt-dlp | 可选 | YouTube 是 |
-| 视频号 | 未实现（见 P2） | 需 MITM 证书 + 系统代理 | — |
+| 平台 | 解析方式 | 鉴权 | 需要 ffmpeg 合并 | 图文（图集） |
+|---|---|---|---|---|
+| B站 | 自研（WBI 签名 + playurl） | 可选，SESSDATA 解锁 1080P+ | **是**（DASH 分离）；音频模式自带纯音轨 | — |
+| 微博 | 自研（游客墙 + statuses/show） | 免登录 | 否 | ✅ 实测 18 张图（`pic_infos` 7 档，按面积取最大） |
+| 快手 | 自研（移动页 `window.INIT_STATE`） | 公开作品免登录 | 否 | — |
+| 小红书 | 自研（`__INITIAL_STATE__`） | 需分享文本里的 `xsec_token` | 否 | ⚠️ 解析实现 + fixture 覆盖，待一条未失效链接 |
+| 抖音 | 自研（详情接口 + 本机算签名） | **需要一次浏览器身份 UIFID**，之后复用 | 否 | ⚠️ 同上（样本作品是视频，字段形状按 `url_list` 约定实现） |
+| YouTube/TikTok | yt-dlp | 可选 | YouTube 是 | — |
+| 视频号 | 未实现（见 P2） | 需 MITM 证书 + 系统代理 | — | — |
 
 **B站匿名只能拿 480P**（实测：接口声明到 1080P+，`dash.video` 实际只有 360P/480P）。
 要高清就导出浏览器 cookie（Netscape 格式）放到 `~/.config/vextract/cookies/bilibili.txt`，
@@ -131,6 +175,7 @@ uv run pytest              # 离线测试（含前端 HTML/JS/路由一致性检
 uv run pytest -m live      # 真机测试（会访问真实平台）
 uv run ruff check src tests scripts
 uv run python scripts/capture_fixtures.py   # 平台改版时重抓 fixture
+uv run python scripts/probe_extras.py       # 查证"音频/弹幕/字幕/图文"上游到底给不给数据
 ```
 
 前端三个文件在 `src/vextract/web/`（`index.html` / `app.js` / `styles.css`），改完刷新即可，
@@ -139,6 +184,9 @@ uv run python scripts/capture_fixtures.py   # 平台改版时重抓 fixture
 ## 许可证与合规
 
 本项目为 MIT。依赖清单只允许 Unlicense / MIT / Apache-2.0 / BSD：
+
+- 可选转录依赖：`mlx-whisper` = **MIT**、`faster-whisper` = **MIT**、`ctranslate2` = **MIT**、`mlx` = **MIT**、
+  `torch` = Apache-2.0/BSD/MIT 混合（实测 `.venv` 装上 mlx 后端后约 1.3GB）；Whisper 模型权重也是 MIT。
 
 - 引擎 `yt-dlp` = **Unlicense**（可自由内嵌、闭源商用、无 copyleft 义务）。
 - 调研中排除的项目：`XHS-Downloader` / `Bili23-Downloader` / `TikTokDownloader`（GPL-3.0）、

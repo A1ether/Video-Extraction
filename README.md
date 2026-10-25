@@ -57,6 +57,8 @@ CLI 保留完整能力，适合批处理与调试：
 ```bash
 uv run vx doctor        # 自检：引擎版本 / ffmpeg / cookie
 uv run vx platforms     # 平台能力矩阵
+uv run vx cookies import <导出文件> --platform douyin   # 把浏览器插件的导出落成 cookie 文件（Netscape / 0600）
+uv run vx cookies show douyin                           # 看当前用的是哪份（只列 cookie 名，不打印值）
 uv run vx info "<分享文本>"            # 只解析
 uv run vx get  "<分享文本>" -o ~/Downloads
 ```
@@ -80,7 +82,7 @@ curl -N localhost:8787/events          # SSE：任务状态与进度
 | 微博 | 自研（游客墙 + statuses/show） | 免登录 | 否 |
 | 快手 | 自研（移动页 `window.INIT_STATE`） | 公开作品免登录 | 否 |
 | 小红书 | 自研（`__INITIAL_STATE__`） | 需分享文本里的 `xsec_token` | 否 |
-| 抖音 | yt-dlp + cookie | **必须 cookie** | 否 |
+| 抖音 | yt-dlp + cookie 阶梯 | **cookie 只是第一道闸**，还缺 uifid 参数 + a_bogus 签名 → 当前不可用 | 否 |
 | YouTube/TikTok | yt-dlp | 可选 | YouTube 是 |
 | 视频号 | 未实现（见 P2） | 需 MITM 证书 + 系统代理 | — |
 
@@ -88,11 +90,28 @@ curl -N localhost:8787/events          # SSE：任务状态与进度
 要高清就导出浏览器 cookie（Netscape 格式）放到 `~/.config/vextract/cookies/bilibili.txt`，
 或在「设置」里选择"从浏览器读取 cookie"。
 
-抖音同理：匿名直连会被风控挡（`Fresh cookies are needed`），页面会直接告诉你两条出路：
+**抖音：cookie 不够用（2026-10-25 实测）。** 匿名直连报 `Fresh cookies are needed`，但补上
+70 条完整登录 cookie 后，详情接口仍返回 `403 Blocked by ArgusSecurityPlugin`。风控是两道闸：
+
+1. cookie 里的 `UIFID` 必须以**查询参数**回传 —— 少了它报 `Uifid Not Found`；
+2. 还缺 `a_bogus` 加签参数 —— 补上 uifid 后才露出来，报 `Signature Not Found`。
+
+yt-dlp 的 `DouyinIE` 两个都不发（源码里就是 `TODO: Run verification challenge code`），
+所以**这条路不是"配置问题"，而是引擎不实现签名**。工具会明确这么告诉你，而不是让你反复导 cookie：
+
+```
+$ uv run vx info "https://www.douyin.com/video/6961737553342991651"
+AUTH_REQUIRED 抖音仍被 Argus 风控拒绝（cookie 已加载，缺的是签名参数）
+  → ① cookie 里的 UIFID 必须以查询参数回传（yt-dlp 不发）
+  → ② 还缺 a_bogus 加签参数 —— yt-dlp 的 DouyinIE 不实现（源码里是 TODO）
+  → 出路：换第三方解析接口兜底，或本地复现 a_bogus 后改走自研 provider（尚未实现）
+```
+
+已有的 cookie 能力仍有用（B站高清、微博/快手偶发风控、小红书高码率都吃它）：
 
 ```bash
-vx get "<抖音分享文本>" --cookies-from-browser chrome   # 读本机 Chrome cookie（只读）
-# 或插件导出 Netscape cookie → ~/.config/vextract/cookies/douyin.txt
+uv run vx cookies import ~/Downloads/cookies.json --platform douyin   # Cookie-Editor 的 JSON 或 Netscape 都吃
+uv run vx get "<链接>" --cookies-from-browser chrome                  # 或直接读本机 Chrome（只读）
 ```
 
 ## 设计要点

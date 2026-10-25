@@ -2,19 +2,23 @@
 
 跑法：`uv run pytest -m live`
 这些用例访问真实平台，用来发现"平台改版导致解析失效"——也就是本项目最大的风险。
+
+抖音用例需要一个真实 UIFID：本机 ~/.config/vextract/cookies/douyin.txt 里已有就直接跑，
+没有就 skip（不把"环境缺失"混成"平台坏了"）。
 """
 
 from __future__ import annotations
 
 import pytest
 
-from vextract import registry
+from vextract import cookies, registry
 
 pytestmark = pytest.mark.live
 
 BILI_URL = "https://www.bilibili.com/video/BV1GJ411x7h7/"
 WEIBO_URL = "https://m.weibo.cn/detail/4189191225395228"
 KS_URL = "https://www.kuaishou.com/short-video/3xwzr5dveyqc5fa"
+DY_URL = "https://www.douyin.com/video/6961737553342991651"
 
 
 async def _extract(url: str):
@@ -43,23 +47,28 @@ async def test_kuaishou_live():
     assert any(s.codec == "hevc" for s in media.streams)
 
 
-DY_URL = "https://www.douyin.com/video/6961737553342991651"
+def _has_uifid() -> bool:
+    path = cookies.cookie_file("douyin")
+    if not path:
+        return False
+    names = {name for _domain, name, _value in cookies.load_netscape(path)}
+    return bool(names & {"UIFID", "UIFID_TEMP", "uifid", "uifid_temp"})
 
 
 @pytest.mark.asyncio
-async def test_douyin_either_works_or_explains_the_argus_gate():
-    """抖音当前必被 Argus 挡：要么解析成功（路线改好后），要么 AUTH_REQUIRED 且说清缺什么。
+async def test_douyin_live_needs_only_a_browser_identity():
+    """抖音：给了 UIFID 就该真的解析出来（自研签名 + 游客 ttwid）。
 
-    注意别把这条写成"必须有 cookie"——实测带 70 条登录 cookie 也一样被拒（docs/01 §4.3）。
+    这条用例的价值在于它会在平台改签名/改闸门时先红：一旦失败，
+    要么重新抓 UIFID，要么说明 Argus 规则变了。
     """
-    from vextract.errors import AuthRequired
+    if not _has_uifid():
+        pytest.skip("没有抖音 UIFID：先 `vx cookies import <导出文件> --platform douyin`")
 
-    try:
-        media = await _extract(DY_URL)
-    except AuthRequired as err:
-        hint = err.hint or ""
-        assert ("vx cookies import" in hint) or ("a_bogus" in hint)  # 必须给出可执行的下一步
-        assert "Traceback" not in hint
-        return
+    media = await _extract(DY_URL)
     assert media.platform == "douyin"
-    assert any(not s.audio_only for s in media.streams)
+    assert media.media_id == "6961737553342991651"
+    video = [s for s in media.streams if not s.audio_only]
+    assert video, "应当至少有一路视频流"
+    assert video[0].headers.get("Referer"), "抖音直链裸请求 403，必须带 Referer"
+    assert media.duration and media.duration > 0

@@ -36,10 +36,10 @@ CAPABILITIES: list[dict[str, str]] = [
     },
     {
         "platform": "douyin",
-        "resolver": "yt-dlp DouyinIE + cookie 阶梯",
-        "auth": "cookie 只是第一道闸；还需要 uifid 参数 + a_bogus 签名",
-        "merge": "不需要（yt-dlp 给合成流）",
-        "verified": "❌ 2026-10-25 实测：70 条登录 cookie 仍被 Argus 403（Signature Not Found），yt-dlp 不实现加签",
+        "resolver": "first-party（本机算 md5 签名 + 游客 ttwid）",
+        "auth": "需要浏览器身份 UIFID（一次即可，之后自动复用）",
+        "merge": "不需要（抖音给音视频一体的 mp4）",
+        "verified": "✅ 2026-10-25 实测 1080p/720p/540p 四档解析 + 下载（h264 1080x1920 + aac，ffprobe 校验）",
     },
     {
         "platform": "youtube / tiktok",

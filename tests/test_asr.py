@@ -315,7 +315,10 @@ def test_transcribe_rejects_repetition_instead_of_shipping_garbage(monkeypatch, 
     with pytest.raises(TranscribeFailed) as err:
         asr.transcribe(audio)
     assert "重复" in err.value.message
-    assert "人声" in (err.value.hint or "")
+    hint = err.value.hint or ""
+    assert "人声" in hint
+    assert "大概没有人声" not in hint, "提示不该替用户断定原因：实测有'有人声但模型塌了'的情况"
+    assert "两种可能" in hint, "要把'没人声'与'模型塌了'并列，否则会误导演用户删素材"
     assert err.value.detail and err.value.detail.startswith("詞曲")
 
 

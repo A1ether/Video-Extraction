@@ -259,10 +259,13 @@ def transcribe(
         raise TranscribeFailed(
             "转录结果像是重复幻觉（同一段内容循环出现）",
             hint=(
-                "这条音频里大概没有人声（纯音乐/BGM/环境音）——Whisper 在这类音频上会陷入重复循环，"
-                "本机实测：一首歌被写成「詞曲 李宗盛 曲 李宗盛 … Zither Harp …」循环数百次。\n"
-                "建议：① 换成有人声的素材；② 只要音频就 `--mode audio`（不要 --transcribe）；"
-                "③ 换后端重试：`--asr-backend faster_whisper`（自带 VAD，会先剔掉无人声段）"
+                "两种可能，别急着认定素材没人声：\n"
+                "  ① 音频里确实没有人声（纯音乐/BGM/环境音）——Whisper 会陷入重复循环，"
+                "本机实测：一首歌被写成「詞曲 李宗盛 … Zither Harp …」循环数百次；\n"
+                "  ② 音频里有人声、但模型塌了。本机实测：同一段 564s 日文剧情（确实有台词）"
+                "被 mlx+small 写成「我看你不太好」循环，换 faster-whisper 拿到 50 段真实台词。\n"
+                "建议：① 先换后端重试 `--asr-backend faster_whisper`（自带 VAD，两种都可能治好）；"
+                "② 只要音频就 `--mode audio`（不要 --transcribe）；③ 再确认素材里到底有没有人声"
             ),
             detail=result.text[:120],
         )

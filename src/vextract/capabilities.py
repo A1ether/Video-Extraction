@@ -37,9 +37,9 @@ CAPABILITIES: list[dict[str, str]] = [
     {
         "platform": "douyin",
         "resolver": "yt-dlp DouyinIE + cookie 阶梯",
-        "auth": "必须 cookie（匿名已实测被拒）",
+        "auth": "cookie 只是第一道闸；还需要 uifid 参数 + a_bogus 签名",
         "merge": "不需要（yt-dlp 给合成流）",
-        "verified": "⚠️ 无 cookie 报 Fresh cookies，需 --cookies-from-browser",
+        "verified": "❌ 2026-10-25 实测：70 条登录 cookie 仍被 Argus 403（Signature Not Found），yt-dlp 不实现加签",
     },
     {
         "platform": "youtube / tiktok",

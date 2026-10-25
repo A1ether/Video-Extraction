@@ -16,10 +16,13 @@ from rich.json import JSON
 from rich.table import Table
 
 from . import capabilities, config, cookies, download, engine, ports, registry
-from .errors import VextractError
+from .errors import CookieExportInvalid, VextractError
 
 app = typer.Typer(add_completion=False, help="自媒体视频提取工具：分享链接 → 无水印视频 + 元数据")
 console = Console()
+
+cookies_app = typer.Typer(help="cookie 阶梯：导入浏览器导出、查看当前状态")
+app.add_typer(cookies_app, name="cookies")
 
 BANNER = "vextract"
 
@@ -65,6 +68,48 @@ def doctor() -> None:
         table.add_row(f"cookie: {platform}", cookies.describe(platform))
     table.add_row("默认输出目录", str(config.settings.out_dir))
     console.print(table)
+
+
+@cookies_app.command("import")
+def cookies_import(
+    source: Path = typer.Argument(..., help="Cookie-Editor 的 JSON 导出，或 Netscape 格式的 cookies.txt"),
+    platform: str = typer.Option("douyin", "--platform", "-p", help="douyin/bilibili/xhs/kuaishou/weibo"),
+) -> None:
+    """把浏览器导出的 cookie 落成 <platform>.txt（Netscape、权限 600）。"""
+    if not source.exists():
+        _fail(CookieExportInvalid(f"找不到文件 {source}", hint="检查路径；导出后直接拖进来即可"))
+        return
+    try:
+        text = source.read_text(encoding="utf-8", errors="ignore")
+    except OSError as exc:
+        _fail(CookieExportInvalid(f"读不了 {source}：{exc}", hint="确认文件可读（插件导出的是文本，不是二进制）"))
+        return
+    try:
+        result = cookies.import_export(text, platform)
+    except ValueError as exc:
+        _fail(
+            CookieExportInvalid(
+                str(exc),
+                hint="在 Cookie-Editor 里选 Export → JSON，或在扩展页右键导出 cookies.txt",
+                platform=platform,
+            )
+        )
+        return
+    console.print(
+        f"[bold green]✔ 已写入[/bold green] {result.path} "
+        f"[dim]({result.written} 条 cookie，权限 600)[/dim]"
+    )
+    for note in result.skipped:
+        console.print(f"  [yellow]跳过[/yellow] {note}")
+    console.print(f"[dim]验证：vx cookies show {platform}；用它真跑一条：vx get '<分享链接>'[/dim]")
+
+
+@cookies_app.command("show")
+def cookies_show(
+    platform: str = typer.Argument(..., help="douyin/bilibili/xhs/kuaishou/weibo"),
+) -> None:
+    """看某个平台当前用的是哪份 cookie（只列名字，不打印值）。"""
+    console.print(cookies.summarize(platform))
 
 
 @app.command("info")

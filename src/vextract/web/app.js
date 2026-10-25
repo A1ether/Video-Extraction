@@ -266,6 +266,23 @@ function renderMedia(data) {
     el("span", { class: "muted", text: "文字稿" }), transcriptFormat,
   ]);
 
+  /* ---------- 字幕（B站需要登录态才会列出）---------- */
+  const subs = data.subtitles || [];
+  const subsBox = el("input", { type: "checkbox", style: "width:auto" });
+  const subsSelect = el("select", {}, (subs.length ? subs : []).map((item) =>
+    el("option", { value: item.lan, text: `${item.lan}${item.lan_doc ? " · " + item.lan_doc : ""}${item.ai ? "（AI）" : ""}` })));
+  const subsRow = el("div", { class: "row wrap gap8 hidden" }, [
+    el("label", { class: "row gap6", style: "cursor:pointer" }, [subsBox, el("span", { text: "同时保存字幕" })]),
+    subsSelect,
+  ]);
+  if (!subs.length) {
+    subsBox.disabled = "disabled";
+    subsSelect.replaceChildren(el("option", { value: "", text: data.extra && data.extra.need_login_subtitle ? "需要登录态才有字幕" : "没有字幕轨" }));
+    subsRow.title = data.extra && data.extra.need_login_subtitle
+      ? "B站的 CC/AI 字幕要登录态（SESSDATA）才列得出来；也可以勾「本地转录」自己生成"
+      : "这条作品没有字幕";
+  }
+
   const grid = el("div", { class: "image-grid hidden" });
   assets.forEach((asset) => {
     grid.append(el("figure", { class: "shot" }, [
@@ -280,6 +297,7 @@ function renderMedia(data) {
     tableWrap.classList.toggle("hidden", mode !== "video");
     audioTools.classList.toggle("hidden", mode !== "audio");
     grid.classList.toggle("hidden", mode !== "images");
+    subsRow.classList.toggle("hidden", mode === "images");
     downloadBtn.textContent = mode === "audio" ? "下载音频" : (mode === "images" ? "下载图集" : "下载视频");
   };
   modeSelect.addEventListener("change", syncMode);
@@ -298,6 +316,7 @@ function renderMedia(data) {
         body.transcribe = transcribeBox.checked;
         body.transcript_format = transcriptFormat.value;
       }
+      if (subsBox.checked && !subsBox.disabled) body.subtitles = [subsSelect.value];
       if (filename.value.trim()) body.filename = filename.value.trim();
       if (outDir.value.trim()) body.out_dir = outDir.value.trim();
       const task = await api("/tasks", { method: "POST", body });
@@ -336,6 +355,7 @@ function renderMedia(data) {
     ]),
     tableWrap,
     audioTools,
+    subsRow,
     grid,
     el("div", { class: "row wrap gap8", style: "margin-top:12px" }, [filename, outDir, downloadBtn]),
     data.needs_merge ? el("p", { class: "hint", text: "该平台音视频分离，下载时会自动调用 ffmpeg 无损合并（-c copy）。" }) : null,

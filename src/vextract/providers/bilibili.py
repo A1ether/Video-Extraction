@@ -17,7 +17,7 @@ from urllib.parse import urlencode
 from .. import http
 from ..download import rank_of
 from ..errors import AuthRequired, NoMedia, UpstreamChanged
-from ..models import MediaInfo, Stream
+from ..models import MediaInfo, Stream, Subtitle
 from .base import Provider
 
 _API = "https://api.bilibili.com"
@@ -100,6 +100,7 @@ class Bilibili(Provider):
             data = payload["data"]
             cid, page_duration, page_note = self._select_page(data, _page_of(url))
             streams, note = await self._playurl(cli, data["bvid"], cid)
+            subtitles, subtitle_gate = await self._subtitles(cli, data["aid"], cid, data["bvid"])
 
         videos = sorted(
             [s for s in streams if not s.audio_only],
@@ -131,6 +132,7 @@ class Bilibili(Provider):
                 if isinstance(stat.get(src), int)
             },
             streams=videos[:6] + audios[:3],
+            subtitles=subtitles,
             needs_merge=bool(audios),
             quality_note="\n".join(part for part in (note, page_note) if part) or None,
             extra={
@@ -139,8 +141,49 @@ class Bilibili(Provider):
                 "bvid": data.get("bvid"),
                 "pages": len(data.get("pages") or []),
                 "page": _page_of(url),
+                "need_login_subtitle": subtitle_gate,
             },
         )
+
+    async def _subtitles(self, cli, aid: int, cid: int, bvid: str) -> tuple[list[Subtitle], bool]:
+        """字幕轨：`x/player/wbi/v2` 的 `data.subtitle.subtitles[]`。
+
+        实测（2026-10-25）：
+        - **匿名恒为空**且 `need_login_subtitle=True`；
+        - 带 SESSDATA（登录态）时真能拿到：`BV1GJ411x7h7` 有 12 轨
+          （zh-CN / zh-Hans / zh-Hant / zh-HK / en-US / ja / ko / de-DE / ru / iw / ca / ase），
+          `BV1JE411N7UD` 有 2 轨（人工 zh-CN + ai-zh）。
+        所以这里不把"没有字幕"当错误，只把"要不要登录"作为事实回传（extra.need_login_subtitle）。
+        """
+        try:
+            img_key, sub_key = await self._wbi_keys(cli)
+            params = sign_wbi({"aid": aid, "cid": cid, "bvid": bvid}, img_key, sub_key)
+            resp = await cli.get(f"{_API}/x/player/wbi/v2", params=params, headers=WEB_REFERER)
+            body = resp.json()
+        except Exception:  # noqa: BLE001 — 字幕是附加信息，拿不到不该让整条解析失败
+            return [], False
+        if body.get("code") != 0:
+            return [], False
+        data = body.get("data") or {}
+        block = data.get("subtitle") or {}
+        out: list[Subtitle] = []
+        for item in block.get("subtitles") or []:
+            url = item.get("subtitle_url") or ""
+            if not url:
+                continue
+            if url.startswith("//"):
+                url = "https:" + url
+            lan = str(item.get("lan") or "")
+            out.append(
+                Subtitle(
+                    lan=lan,
+                    lan_doc=str(item.get("lan_doc") or ""),
+                    url=url,
+                    ai=lan.startswith("ai-"),
+                    headers={**WEB_REFERER, "User-Agent": http.DESKTOP_UA},
+                )
+            )
+        return out, bool(data.get("need_login_subtitle"))
 
     @staticmethod
     def _select_page(data: dict, page_no: int) -> tuple[int, float | None, str | None]:

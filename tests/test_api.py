@@ -55,7 +55,8 @@ def patch_success(monkeypatch, tmp_path: Path, *, size: int = 8, captured: dict 
     async def fake_download(
         media, *, out_dir, quality="best", stream_index=None, filename=None, mode=None,
         audio_format="m4a", embed_tags=True, transcribe=False, transcript_format="md",
-        asr_backend=None, asr_model=None, asr_language=None, progress=None, cancel=None, on_artifact=None,
+        subtitle_langs=None, asr_backend=None, asr_model=None, asr_language=None,
+        progress=None, cancel=None, on_artifact=None,
     ):
         if captured is not None:   # 用来断言"前端传的模式/格式真的走到了下载层"
             captured.update(

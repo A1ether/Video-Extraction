@@ -35,6 +35,75 @@ def test_sign_wbi_filters_forbidden_chars():
     assert a["w_rid"] == b["w_rid"]
 
 
+# ---------- 字幕（登录态才有；实测 12 轨 / 2 轨 / 匿名 0 轨）----------
+def test_subtitle_parse_from_player_v2_payload():
+    """`x/player/wbi/v2` 的 subtitle.subtitles[] 结构（实测形状）。"""
+    payload = {
+        "code": 0,
+        "data": {
+            "need_login_subtitle": False,
+            "subtitle": {
+                "subtitles": [
+                    {"lan": "zh-CN", "lan_doc": "中文（中国）", "subtitle_url": "//aisubtitle.hdslb.com/bfs/subtitle/a.json"},
+                    {"lan": "ai-zh", "lan_doc": "中文", "subtitle_url": "//aisubtitle.hdslb.com/bfs/ai_subtitle/prod/b.json"},
+                    {"lan": "en-US", "lan_doc": "English(US)", "subtitle_url": ""},
+                ]
+            },
+        },
+    }
+    import asyncio
+
+    class FakeResponse:
+        def __init__(self, data):
+            self._data = data
+
+        def json(self):
+            return self._data
+
+    class FakeClient:
+        """nav 请求要回 wbi 密钥，其余回字幕 payload——_subtitles 会先取密钥。"""
+
+        async def get(self, url, **_k):
+            if "/nav" in url:
+                return FakeResponse(
+                    {"code": 0, "data": {"wbi_img": {"img_url": "https://i0/x/" + "A" * 32 + ".png",
+                                                     "sub_url": "https://i0/x/" + "B" * 32 + ".png"}}}
+                )
+            return FakeResponse(payload)
+
+    provider = Bilibili()
+    subs, need_login = asyncio.run(provider._subtitles(FakeClient(), 1, 2, "BV1"))
+    assert need_login is False
+    assert [s.lan for s in subs] == ["zh-CN", "ai-zh"], "空 subtitle_url 的轨要跳过"
+    assert subs[0].url.startswith("https://"), "协议相对 URL 要补全"
+    assert subs[1].ai is True and subs[0].ai is False
+    assert "bilibili.com" in subs[0].headers.get("Referer", "")
+
+
+def test_subtitle_gate_is_reported_not_raised():
+    """匿名时字幕恒为空且 need_login_subtitle=true：这是事实，不是错误。"""
+    import asyncio
+
+    class FakeResponse:
+        def __init__(self, data):
+            self._data = data
+
+        def json(self):
+            return self._data
+
+    class FakeClient:
+        async def get(self, url, **_k):
+            if "/nav" in url:
+                return FakeResponse(
+                    {"code": 0, "data": {"wbi_img": {"img_url": "https://i0/x/" + "A" * 32 + ".png",
+                                                     "sub_url": "https://i0/x/" + "B" * 32 + ".png"}}}
+                )
+            return FakeResponse({"code": 0, "data": {"need_login_subtitle": True, "subtitle": {"subtitles": []}}})
+
+    subs, need_login = asyncio.run(Bilibili()._subtitles(FakeClient(), 1, 2, "BV1"))
+    assert subs == [] and need_login is True
+
+
 # ---------- 多分P 合集（实测踩到：界面写 122:10，产物只有 9 分钟）----------
 def multi_page_view() -> dict:
     return {

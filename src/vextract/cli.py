@@ -188,6 +188,12 @@ def info(
             size,
         )
     console.print(table)
+    if media.subtitles:
+        langs = "、".join(f"{item.lan}({item.lan_doc})" for item in media.subtitles)
+        console.print(f"[bold]{len(media.subtitles)} 条字幕[/bold]：{langs}")
+        console.print("[dim]下载字幕：`vx get <链接> --subs auto`（或 --subs zh-CN,en-US）[/dim]")
+    elif media.extra.get("need_login_subtitle"):
+        console.print("[dim]CC 字幕需要登录态（SESSDATA）才会列出；也可以 --transcribe 走本地 ASR[/dim]")
     if media.needs_merge:
         console.print("[dim]该平台音视频分离，下载时会调用 ffmpeg 无损合并（-c copy）[/dim]")
 
@@ -204,6 +210,9 @@ def get(
     no_tags: bool = typer.Option(False, "--no-tags", help="不把标题/作者/来源写进音频标签"),
     transcribe: bool = typer.Option(False, "--transcribe", help="音频落盘后再跑本地 ASR，输出文字稿"),
     transcript_format: str = typer.Option("md", "--transcript-format", help="文字稿格式：md/txt/srt"),
+    subs: str | None = typer.Option(
+        None, "--subs", help="同时保存字幕：auto（按偏好挑一条）或语言码，如 zh-CN / zh-CN,en-US"
+    ),
     asr_backend: str | None = typer.Option(
         None, "--asr-backend", help="mlx_whisper/faster_whisper/whisper；非人声音频建议 faster_whisper（自带 VAD）"
     ),
@@ -241,6 +250,7 @@ def get(
                 embed_tags=not no_tags,
                 transcribe=transcribe,
                 transcript_format=transcript_format,
+                subtitle_langs=[item.strip() for item in subs.split(",")] if subs else None,
                 asr_backend=asr_backend,
                 asr_model=asr_model,
                 asr_language=asr_language,
@@ -254,7 +264,9 @@ def get(
     size = _path_size(path)
     console.print(f"[bold green]✔ 完成[/bold green] {path}  ({size / 1048576:.1f} MB)")
     for artifact in artifacts:
-        if artifact.suffix in (".md", ".txt", ".srt"):
+        if artifact.suffix == ".srt":
+            console.print(f"  [green]字幕[/green] {artifact}")
+        elif artifact.suffix in (".md", ".txt"):
             console.print(f"  [green]文字稿[/green] {artifact}")
         elif len(artifacts) <= 12:
             console.print(f"  [dim]{artifact.name}[/dim]")

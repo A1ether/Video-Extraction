@@ -155,6 +155,31 @@ async def test_douyin_live_audio_download_extracts_and_tags(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_bilibili_live_subtitles_need_login_but_exist_with_it():
+    """B站字幕：匿名 0 轨（need_login_subtitle=True），带登录态才有轨。
+
+    这条用例同时钉住"http.browser_cookies 让自研 provider 也能用浏览器登录态"。
+    """
+    from vextract import config
+
+    anonymous = await _extract("https://www.bilibili.com/video/BV1GJ411x7h7/")
+    assert anonymous.subtitles == [], "匿名不该有字幕轨（实测 subtitles=[]）"
+    assert anonymous.extra.get("need_login_subtitle") is True
+
+    original = config.settings.cookies_from_browser
+    config.settings.cookies_from_browser = "chrome"
+    try:
+        logged_in = await _extract("https://www.bilibili.com/video/BV1GJ411x7h7/")
+    finally:
+        config.settings.cookies_from_browser = original
+
+    if not logged_in.subtitles:
+        pytest.skip("本机 Chrome 没有 B站登录态（或钥匙串未授权），跳过登录态断言")
+    assert any(item.lan == "zh-CN" for item in logged_in.subtitles)
+    assert all(item.url.startswith("https://") for item in logged_in.subtitles)
+
+
+@pytest.mark.asyncio
 async def test_douyin_live_transcription(tmp_path):
     """本地转录端到端：音频 → 文字稿。
 

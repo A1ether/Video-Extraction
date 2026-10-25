@@ -123,6 +123,14 @@ def test_settings_panel_binds_audio_and_asr_fields():
         assert f'id="{element}"' in INDEX, f"设置页缺 {element}"
 
 
+def test_subtitle_picker_is_wired():
+    """字幕要能在提取页勾选，并随任务一起提交（B站需登录态才有轨）。"""
+    assert "subtitles" in JS
+    assert "subsSelect" in JS and "同时保存字幕" in JS
+    assert 'body.subtitles = [subsSelect.value]' in JS
+    assert "need_login_subtitle" in JS, "匿名时要说明为什么没有字幕"
+
+
 def test_artifact_urls_match_a_real_route():
     routes = {(path, "GET") for path, method in _routes() if method == "GET"}
     assert "/tasks/${task.id}/artifact?index=" in JS, "图集/文字稿要通过 /tasks/{id}/artifact 取"

@@ -69,6 +69,9 @@ class TaskRequest(BaseModel):
     embed_tags: bool = True
     transcribe: bool = Field(default=False, description="音频落盘后再跑本地 ASR 出文字稿")
     transcript_format: TranscriptFormat = "md"
+    subtitles: list[str] | None = Field(
+        default=None, description="要保存的字幕轨：['auto'] 或 ['zh-CN','en-US']；None 表示不下"
+    )
     asr_backend: str | None = Field(default=None, description="mlx_whisper / faster_whisper / whisper；留空自动挑")
     asr_model: str | None = None
     asr_language: str | None = None
@@ -176,6 +179,7 @@ async def create_task(payload: TaskRequest) -> dict:
         embed_tags=payload.embed_tags,
         transcribe=payload.transcribe,
         transcript_format=payload.transcript_format,
+        subtitles=payload.subtitles,
         asr_backend=payload.asr_backend,
         asr_model=payload.asr_model,
         asr_language=payload.asr_language,
@@ -324,6 +328,7 @@ async def download_endpoint(payload: TaskRequest) -> dict:
         embed_tags=payload.embed_tags,
         transcribe=payload.transcribe,
         transcript_format=payload.transcript_format,
+        subtitle_langs=payload.subtitles,
         asr_backend=payload.asr_backend,
         asr_model=payload.asr_model,
         asr_language=payload.asr_language,

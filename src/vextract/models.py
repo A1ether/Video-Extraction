@@ -38,6 +38,21 @@ class Stream(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict)
 
 
+class Subtitle(BaseModel):
+    """一条字幕轨（B站 CC / AI 字幕）。
+
+    实测（登录态）：`x/player/wbi/v2` 的 `data.subtitle.subtitles[]` 每项给
+    `lan` / `lan_doc` / `subtitle_url`，URL 指向一个 JSON：
+    `{body: [{from, to, location, content}]}`。`ai-` 前缀是机器生成。
+    """
+
+    lan: str
+    lan_doc: str = ""
+    url: str
+    ai: bool = False
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
 class Asset(BaseModel):
     """图文作品里的一张图（抖音/小红书图文笔记、微博配图）。
 
@@ -66,6 +81,8 @@ class MediaInfo(BaseModel):
     streams: list[Stream] = Field(default_factory=list)
     assets: list[Asset] = Field(default_factory=list)
     """图文作品的图片集。与 streams 互斥：图文的 streams 为空。"""
+    subtitles: list[Subtitle] = Field(default_factory=list)
+    """可用字幕轨。B站需要登录态（SESSDATA）才会列出——匿名恒为空。"""
     needs_merge: bool = False
     quality_note: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)

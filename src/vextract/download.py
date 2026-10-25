@@ -26,7 +26,7 @@ import httpx
 
 from . import config
 from .errors import Cancelled, DependencyMissing, DownloadFailed
-from .models import Asset, AudioFormat, MediaInfo, Mode, Stream, TranscriptFormat
+from .models import Asset, AudioFormat, MediaInfo, Mode, Stream, Subtitle, TranscriptFormat
 
 _UNSAFE = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
@@ -248,6 +248,7 @@ def _emit(
     total: int | None = None,
     message: str = "",
     mode: Mode = "video",
+    unit: str = "bytes",
 ) -> None:
     if progress:
         progress(
@@ -257,6 +258,7 @@ def _emit(
                 total=total,
                 overall=_overall(stage, done, total, mode),
                 message=message,
+                unit=unit,
             )
         )
 
@@ -358,6 +360,100 @@ def audio_codec_args(path: Path, want: AudioFormat) -> list[str]:
     if want == "mp3":
         return ["-vn", "-c:a", "libmp3lame", "-q:a", "2"]
     return ["-vn", "-c:a", "flac"]
+
+
+SUBTITLE_PREFERENCE = ("zh-CN", "zh-Hans", "ai-zh", "zh-Hant", "zh-HK", "en-US")
+"""自动挑字幕时的优先级：人工简体 > 人工通用 > AI 中文 > 繁体 > 英文。"""
+
+
+def pick_subtitles(media: MediaInfo, langs: list[str] | None = None) -> list[Subtitle]:
+    """挑字幕轨。`langs=None` 按偏好挑一条；给了列表就按列表取（支持 `auto`）。
+
+    没有可用轨时抛 DownloadFailed 并说清原因——B站匿名查询字幕恒为空，
+    用户不该看到"下载成功但什么都没有"。
+    """
+    available = media.subtitles or []
+    if not available:
+        raise DownloadFailed(
+            "这条作品没有可用字幕",
+            hint=(
+                "B站的 CC/AI 字幕要**登录态**才列得出来（实测：匿名 subtitles=[] 且 "
+                "need_login_subtitle=true；带 SESSDATA 后同一条视频能拿到 1~12 轨）。\n"
+                "配好 `~/.config/vextract/cookies/bilibili.txt` 或在设置里选「从浏览器读取 cookie」再试；"
+                "也可以直接用 `--transcribe` 走本地 ASR 生成字幕"
+            ),
+            platform=media.platform,
+        )
+
+    if not langs or langs == ["auto"]:
+        by_lan = {item.lan: item for item in available}
+        for lan in SUBTITLE_PREFERENCE:
+            if lan in by_lan:
+                return [by_lan[lan]]
+        return [available[0]]
+
+    wanted = [name.strip() for name in langs if name and name.strip() and name != "auto"]
+    picked = [item for item in available if item.lan in wanted]
+    missing = [name for name in wanted if name not in {item.lan for item in available}]
+    if missing:
+        raise DownloadFailed(
+            f"没有这些字幕轨：{', '.join(missing)}",
+            hint="可用的有：" + "、".join(f"{item.lan}({item.lan_doc})" for item in available),
+            platform=media.platform,
+        )
+    return picked
+
+
+async def save_subtitles(
+    media: MediaInfo,
+    *,
+    out_dir: Path,
+    stem: str,
+    langs: list[str] | None = None,
+    progress: ProgressCb | None = None,
+    mode: Mode = "video",
+) -> list[Path]:
+    """把字幕轨落成 `.srt`（与主产物同名，后缀带语言码）。
+
+    转换复用 `asr.render_srt`：时间戳格式只在一处维护，别为了字幕再写一份。
+    """
+    from . import asr  # 本地导入：asr 反过来也要用 download.unique_path
+
+    picked = pick_subtitles(media, langs)
+    written: list[Path] = []
+    for index, subtitle in enumerate(picked, start=1):
+        _emit(progress, "字幕", index - 1, len(picked), f"{subtitle.lan}", mode, unit="count")
+        try:
+            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as cli:
+                resp = await cli.get(subtitle.url, headers=subtitle.headers or None)
+        except httpx.HTTPError as exc:
+            raise DownloadFailed(f"字幕下载失败：{exc}", hint="字幕直链有时效，重新解析一次") from exc
+        if resp.status_code >= 400:
+            raise DownloadFailed(
+                f"字幕下载失败：HTTP {resp.status_code}",
+                hint="字幕直链有时效，重新解析一次",
+            )
+        payload = resp.json()
+        segments = [
+            asr.Segment(
+                start=float(row.get("from") or 0.0),
+                end=float(row.get("to") or 0.0),
+                text=str(row.get("content") or "").strip(),
+            )
+            for row in (payload.get("body") or [])
+            if str(row.get("content") or "").strip()
+        ]
+        if not segments:
+            raise DownloadFailed(
+                f"字幕 {subtitle.lan} 是空的",
+                hint="这条字幕轨可能还没生成完；换一条语言或稍后重试",
+            )
+        text = asr.render_srt(asr.Transcript(text=" ".join(s.text for s in segments), segments=segments))
+        dest = unique_path(out_dir / f"{stem}.{subtitle.lan}.srt")
+        dest.write_text(text, encoding="utf-8")
+        written.append(dest)
+        _emit(progress, "字幕", index, len(picked), f"{subtitle.lan}", mode, unit="count")
+    return written
 
 
 def _tag_args(media: MediaInfo) -> list[str]:
@@ -520,6 +616,7 @@ async def download(
     embed_tags: bool = True,
     transcribe: bool = False,
     transcript_format: TranscriptFormat = "md",
+    subtitle_langs: list[str] | None = None,   # None / ["auto"] = 不下载字幕；["zh-CN"] / ["auto"] 自动挑
     asr_backend: str | None = None,
     asr_model: str | None = None,
     asr_language: str | None = None,
@@ -580,7 +677,7 @@ async def download(
             _emit(progress, "完成", path.stat().st_size, path.stat().st_size, str(path), "audio")
         return path
 
-    return await _download_video(
+    path = await _download_video(
         media,
         out_dir=out_dir,
         quality=quality,
@@ -589,3 +686,15 @@ async def download(
         progress=progress,
         cancel=cancel,
     )
+    if subtitle_langs:
+        written = await save_subtitles(
+            media,
+            out_dir=out_dir,
+            stem=path.stem,
+            langs=subtitle_langs,
+            progress=progress,
+        )
+        if on_artifact:
+            for artifact in written:
+                on_artifact(artifact)
+    return path

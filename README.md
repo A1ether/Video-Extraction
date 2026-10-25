@@ -82,7 +82,7 @@ curl -N localhost:8787/events          # SSE：任务状态与进度
 | 微博 | 自研（游客墙 + statuses/show） | 免登录 | 否 |
 | 快手 | 自研（移动页 `window.INIT_STATE`） | 公开作品免登录 | 否 |
 | 小红书 | 自研（`__INITIAL_STATE__`） | 需分享文本里的 `xsec_token` | 否 |
-| 抖音 | yt-dlp + cookie 阶梯 | **cookie 只是第一道闸**，还缺 uifid 参数 + a_bogus 签名 → 当前不可用 | 否 |
+| 抖音 | 自研（详情接口 + 本机算签名） | **需要一次浏览器身份 UIFID**，之后复用 | 否 |
 | YouTube/TikTok | yt-dlp | 可选 | YouTube 是 |
 | 视频号 | 未实现（见 P2） | 需 MITM 证书 + 系统代理 | — |
 
@@ -90,29 +90,25 @@ curl -N localhost:8787/events          # SSE：任务状态与进度
 要高清就导出浏览器 cookie（Netscape 格式）放到 `~/.config/vextract/cookies/bilibili.txt`，
 或在「设置」里选择"从浏览器读取 cookie"。
 
-**抖音：cookie 不够用（2026-10-25 实测）。** 匿名直连报 `Fresh cookies are needed`，但补上
-70 条完整登录 cookie 后，详情接口仍返回 `403 Blocked by ArgusSecurityPlugin`。风控是两道闸：
+**抖音：需要一次浏览器身份，之后不用再管。** 风控（Argus）在详情接口上要三样东西：
 
-1. cookie 里的 `UIFID` 必须以**查询参数**回传 —— 少了它报 `Uifid Not Found`；
-2. 还缺 `a_bogus` 加签参数 —— 补上 uifid 后才露出来，报 `Signature Not Found`。
+1. `UIFID` —— 浏览器的持久访客 ID，**只能由真实浏览器产生**（首页/详情/分享页都不会下发）；
+2. `ttwid` —— 游客令牌，可以自造，工具会自动去 `ttwid.bytedance.com` 免费注册并缓存；
+3. `x-secsdk-web-signature` —— 32 位 md5，是 `UIFID + 时间戳 + 固定 salt + query` 的纯函数，
+   本机算得出来，**不需要 a_bogus**（那套 849 行 VM 逆向代码在这里不是必需项）。
 
-yt-dlp 的 `DouyinIE` 两个都不发（源码里就是 `TODO: Run verification challenge code`），
-所以**这条路不是"配置问题"，而是引擎不实现签名**。工具会明确这么告诉你，而不是让你反复导 cookie：
-
-```
-$ uv run vx info "https://www.douyin.com/video/6961737553342991651"
-AUTH_REQUIRED 抖音仍被 Argus 风控拒绝（cookie 已加载，缺的是签名参数）
-  → ① cookie 里的 UIFID 必须以查询参数回传（yt-dlp 不发）
-  → ② 还缺 a_bogus 加签参数 —— yt-dlp 的 DouyinIE 不实现（源码里是 TODO）
-  → 出路：换第三方解析接口兜底，或本地复现 a_bogus 后改走自研 provider（尚未实现）
-```
-
-已有的 cookie 能力仍有用（B站高清、微博/快手偶发风控、小红书高码率都吃它）：
+所以只要给一次 UIFID，之后就永远不用再碰 cookie 了：
 
 ```bash
-uv run vx cookies import ~/Downloads/cookies.json --platform douyin   # Cookie-Editor 的 JSON 或 Netscape 都吃
-uv run vx get "<链接>" --cookies-from-browser chrome                  # 或直接读本机 Chrome（只读）
+uv run vx cookies import ~/Downloads/douyin-cookies.json --platform douyin   # 一次
+uv run vx get "https://www.douyin.com/video/<id>"                            # 之后随便跑
+# 或者完全不导入文件，直接让它读你本机浏览器：
+uv run vx get "<链接>" --cookies-from-browser chrome
 ```
+
+实测产物：`h264 1080x1920 + aac`，19.73s，6.0 MB，**无水印**；分档 1080p / 720p / 540p / 540p 低码率。
+唯一没省掉的一步就是那一次 UIFID —— 它不是 cookie 登录态，只是设备指纹，但服务端确实
+只认浏览器造出来的那份（本地任何 HTTP 入口都拿不到，已实测）。
 
 ## 设计要点
 

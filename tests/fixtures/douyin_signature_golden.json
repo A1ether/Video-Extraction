@@ -1,0 +1,7 @@
+{
+ "uifid": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+ "timestamp": 1792870001,
+ "query": "device_platform=webapp&aid=6383&aweme_id=6961737553342991651&uifid=uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu&timestamp=1792870001",
+ "signature": "de3c2d82a0214ddbce69d0288d950bd0",
+ "note": "合成向量：只锁住 md5 的输入格式（顺序/分隔/转义/salt），不用于证明平台仍接受；后者由 -m live 端到端验证"
+}

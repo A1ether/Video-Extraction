@@ -1,16 +1,25 @@
-"""抖音 provider：cookie 阶梯 + "cookie 到位也没用"时给出真话。全部离线。"""
+"""抖音 provider：自研签名 + 身份闸门。全部离线（fixture 驱动），不碰网络。"""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from urllib.parse import parse_qsl
 
+import httpx
 import pytest
 
-from vextract import config, cookies, engine
-from vextract.errors import AuthRequired
-from vextract.models import MediaInfo, Stream
-from vextract.providers.douyin import Douyin
+from vextract import config, cookies
+from vextract.errors import AuthRequired, NoMedia, RateLimited, UpstreamChanged
+from vextract.providers.douyin import (
+    SIGNATURE_SALT,
+    Douyin,
+    aweme_id_of,
+    encode_pairs,
+    sign_query,
+)
 
+FIXTURES = Path(__file__).parent / "fixtures"
 URL = "https://www.douyin.com/video/6961737553342991651"
 
 
@@ -19,85 +28,260 @@ def provider() -> Douyin:
     return Douyin()
 
 
+@pytest.fixture
+def detail() -> dict:
+    return json.loads((FIXTURES / "douyin_detail.json").read_text(encoding="utf-8"))
+
+
 @pytest.fixture(autouse=True)
-def no_browser_cookie_option(monkeypatch):
-    monkeypatch.setattr(config.settings, "cookies_from_browser", None)
-
-
-def fake_media() -> MediaInfo:
-    return MediaInfo(
-        platform="douyin",
-        media_id="6961737553342991651",
-        source_url=URL,
-        title="标题",
-        streams=[Stream(url="https://cdn/v.mp4", quality="720p", rank=720)],
+def cookie_jar(monkeypatch, tmp_path: Path):
+    """把 cookie 目录指到 tmp，并放一份只含 UIFID 的导出（模拟用户导入过）。"""
+    path = tmp_path / "douyin.txt"
+    path.write_text(
+        "# Netscape HTTP Cookie File\n"
+        ".douyin.com\tTRUE\t/\tTRUE\t1823151027\tUIFID\t" + "a" * 320 + "\n",
+        encoding="utf-8",
     )
+    monkeypatch.setattr(cookies, "cookie_file", lambda platform: path if platform == "douyin" else None)
+    yield path
 
 
-def test_matches_douyin_and_iesdouyin(provider: Douyin):
+@pytest.fixture(autouse=True)
+def guest_ttwid(monkeypatch):
+    """ttwid 走缓存，不真的去打注册接口。"""
+
+    async def fake(self) -> str:
+        return "1%7Cguest-ttwid"
+
+    monkeypatch.setattr(Douyin, "_ttwid", fake)
+
+
+# ---------- URL → 作品 ID ----------
+@pytest.mark.parametrize(
+    ("url", "expect"),
+    [
+        ("https://www.douyin.com/video/6961737553342991651", "6961737553342991651"),
+        ("https://www.douyin.com/video/6961737553342991651?previous_page=x", "6961737553342991651"),
+        ("https://www.iesdouyin.com/share/video/7298145681699622182/?region=CN", "7298145681699622182"),
+        ("https://www.douyin.com/note/7278279725944507659", "7278279725944507659"),
+        ("https://www.douyin.com/discover?modal_id=6961737553342991651", "6961737553342991651"),
+        ("https://www.douyin.com/user/MS4wLjABAAAA", None),
+    ],
+)
+def test_aweme_id_of(url: str, expect: str | None):
+    assert aweme_id_of(url) == expect
+
+
+def test_matches_only_douyin(provider: Douyin):
     assert provider.matches(URL)
     assert provider.matches("https://v.douyin.com/iRNBho6u/")
-    assert provider.matches("https://www.iesdouyin.com/share/video/1/")
     assert not provider.matches("https://www.bilibili.com/video/BV1")
 
 
+# ---------- 签名 ----------
+def test_signature_matches_pinned_vector():
+    """格式护栏：输入拼接方式（顺序、分隔符、转义、salt）一旦改动就会红。"""
+    golden = json.loads((FIXTURES / "douyin_signature_golden.json").read_text(encoding="utf-8"))
+    assert sign_query(golden["query"], golden["uifid"], golden["timestamp"]) == golden["signature"]
+
+
+def test_signature_is_a_pure_function_of_its_inputs():
+    """无 nonce 无状态：同输入同输出（这也正是它能离线复算的原因）。"""
+    a = sign_query("aweme_id=1", "u" * 10, 1792870001)
+    b = sign_query("aweme_id=1", "u" * 10, 1792870001)
+    assert a == b and len(a) == 32
+    assert sign_query("aweme_id=1", "u" * 10, 1792870002) != a  # 时间戳变化必须改变签名
+
+
+def test_signature_is_32_hex():
+    sig = sign_query("aweme_id=1", "x", 1)
+    assert len(sig) == 32 and all(c in "0123456789abcdef" for c in sig)
+
+
+def test_query_encoding_matches_urlsearchparams():
+    """`*-._` 不转义、空格变 %20 —— 签名与发出去的 URL 必须是同一串字节。"""
+    assert encode_pairs([("a b", "c*d-e.f_g")]) == "a%20b=c*d-e.f_g"
+    assert encode_pairs([("k", "中文")]) == "k=%E4%B8%AD%E6%96%87"
+
+
+def test_salt_is_the_documented_constant():
+    assert SIGNATURE_SALT == "A96D855A08C0A9707F8BEF0D9A527E4E"
+
+
+# ---------- 身份闸门 ----------
 @pytest.mark.asyncio
-async def test_without_cookie_tells_user_how_to_export(provider: Douyin, monkeypatch):
+async def test_missing_uifid_asks_for_a_browser_identity(provider: Douyin, monkeypatch):
     monkeypatch.setattr(cookies, "cookie_file", lambda platform: None)
     with pytest.raises(AuthRequired) as exc:
         await provider.resolve(URL)
-    assert "cookie" in exc.value.message
-    assert "vx cookies import" in exc.value.hint  # 指引必须是可执行的下一步
-    assert exc.value.platform == "douyin"
+    assert "UIFID" in exc.value.message
+    assert "vx cookies import" in exc.value.hint
 
 
 @pytest.mark.asyncio
-async def test_engine_gets_the_cookie_file(provider: Douyin, monkeypatch, tmp_path: Path):
-    jar = tmp_path / "douyin.txt"
-    jar.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
-    monkeypatch.setattr(cookies, "ytdlp_cookiefile", lambda platform: str(jar))
+async def test_no_aweme_id_is_no_media(provider: Douyin):
+    with pytest.raises(NoMedia) as exc:
+        await provider.resolve("https://www.douyin.com/user/MS4wLjABAAAA")
+    assert "作品 ID" in exc.value.message
+
+
+# ---------- 成功路径 ----------
+@pytest.mark.asyncio
+async def test_resolve_uses_uifid_and_signature(provider: Douyin, monkeypatch, detail: dict):
     seen: dict[str, object] = {}
 
-    async def fake_extract(url, *, platform, cookiefile=None, from_browser=None):
-        seen.update(url=url, platform=platform, cookiefile=cookiefile, from_browser=from_browser)
-        return fake_media()
+    class FakeResponse:
+        status_code = 200
+        text = json.dumps({"aweme_detail": detail})
 
-    monkeypatch.setattr(engine, "extract_with_ytdlp", fake_extract)
+    async def fake_get(self, url, **kwargs):
+        seen["url"] = url
+        seen["cookies"] = {c.name: c.value for c in self.cookies.jar}
+        seen["referer"] = self.headers.get("Referer")
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
     media = await provider.resolve(URL)
+
+    assert media.platform == "douyin"
     assert media.media_id == "6961737553342991651"
-    assert seen == {"url": URL, "platform": "douyin", "cookiefile": str(jar), "from_browser": None}
+    assert media.title.startswith("#杨超越")
+    assert media.author == "杨超越"
+    assert media.duration == pytest.approx(19.782)
+    assert media.needs_merge is False
+    assert media.stats["like"] == 323278
+
+    url = str(seen["url"])
+    assert "x-secsdk-web-signature=" in url and "a_bogus" not in url  # a_bogus 不是必需项
+    params = dict(parse_qsl(url.split("?")[1]))
+    assert params["uifid"] == "a" * 320
+    assert len(params["x-secsdk-web-signature"]) == 32
+    assert seen["cookies"]["UIFID"] == "a" * 320
+    assert seen["cookies"]["ttwid"] == "1%7Cguest-ttwid"
+    assert str(seen["referer"]).startswith("https://www.douyin.com")  # 缺 Referer 会拿到空 body
+
+
+def test_streams_cover_every_gear_and_prefer_high_bitrate(provider: Douyin, detail: dict):
+    media = provider._to_media(detail, "6961737553342991651")
+    labels = [s.quality for s in media.streams]
+    assert labels[0].startswith("1080p")  # 最高档排在前面
+    assert any("720p" in label for label in labels)
+    assert all(s.headers.get("Referer") for s in media.streams)  # 直链裸请求 403，必须带 Referer
+    assert media.streams[0].rank > media.streams[-1].rank
+    assert media.streams[0].filesize and media.streams[0].filesize > 1_000_000
+
+
+def test_lower_gear_is_marked_so_users_do_not_pick_it_as_best(provider: Douyin, detail: dict):
+    media = provider._to_media(detail, "6961737553342991651")
+    low = [s for s in media.streams if "低码率" in s.quality]
+    assert low, "lower_540_0 应当被标注为低码率"
+    assert low[0].rank < media.streams[0].rank
+
+
+def test_images_only_post_is_no_media(provider: Douyin, detail: dict):
+    post = {**detail, "video": {}, "images": [{"url_list": ["https://x/1.jpg"]}]}
+    with pytest.raises(NoMedia) as exc:
+        provider._to_media(post, "1")
+    assert "图文" in exc.value.message
+
+
+# ---------- 失败路径 ----------
+def _respond(monkeypatch, *, status: int, text: str):
+    class FakeResponse:
+        status_code = status
+
+    FakeResponse.text = text
+
+    async def fake_get(self, url, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
 
 @pytest.mark.asyncio
-async def test_cookie_present_but_still_blocked_blames_the_signature(provider: Douyin, monkeypatch, tmp_path: Path):
-    """cookie 已加载却仍被拒 → 必须指向 a_bogus 签名，而不是继续让用户折腾 cookie。"""
-    jar = tmp_path / "douyin.txt"
-    jar.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
-    monkeypatch.setattr(cookies, "ytdlp_cookiefile", lambda platform: str(jar))
-
-    async def blocked(url, **kwargs):
-        raise AuthRequired("该平台要求浏览器 cookie（不是登录态也常常需要）", detail="Fresh cookies are needed")
-
-    monkeypatch.setattr(engine, "extract_with_ytdlp", blocked)
-    with pytest.raises(AuthRequired) as exc:
+async def test_argus_rejection_is_rate_limited_with_actionable_hint(provider: Douyin, monkeypatch):
+    _respond(monkeypatch, status=403, text="Blocked by ArgusSecurityPlugin Signature Not Found")
+    with pytest.raises(RateLimited) as exc:
         await provider.resolve(URL)
-    hint = exc.value.hint
-    assert "a_bogus" in hint and "UIFID" in hint and "Argus" in hint
-    assert exc.value.detail == "Fresh cookies are needed"  # 上游原文留在 detail，便于排查
-    assert "vx cookies import" not in hint  # 别再教用户导 cookie：他已经导过了
+    assert "Argus" in exc.value.message
+    assert "vx cookies import" in exc.value.hint  # 下一步必须可执行
 
 
 @pytest.mark.asyncio
-async def test_cookies_from_browser_counts_as_a_cookie(provider: Douyin, monkeypatch):
-    """--cookies-from-browser 也算阶梯里的一档，不该先被 cookie 检查拦下。"""
-    monkeypatch.setattr(config.settings, "cookies_from_browser", "chrome")
+async def test_empty_body_is_upstream_changed_not_no_media(provider: Douyin, monkeypatch):
+    """200 + 0 字节是 Referer 被剥离的典型症状，不能误报成"作品不存在"。"""
+    _respond(monkeypatch, status=200, text="")
+    with pytest.raises(UpstreamChanged) as exc:
+        await provider.resolve(URL)
+    assert "空响应" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_missing_detail_reports_the_platform_reason(provider: Douyin, monkeypatch):
+    body = json.dumps(
+        {
+            "aweme_detail": None,
+            "filter_detail": {"aweme_id": "1", "detail_msg": "因作品权限或已被删除，无法观看", "filter_reason": "status_deleted"},
+        }
+    )
+    _respond(monkeypatch, status=200, text=body)
+    with pytest.raises(NoMedia) as exc:
+        await provider.resolve(URL)
+    assert "已被删除" in exc.value.message
+    assert "status_deleted" in (exc.value.detail or "")
+
+
+@pytest.mark.asyncio
+async def test_non_json_is_upstream_changed(provider: Douyin, monkeypatch):
+    _respond(monkeypatch, status=200, text="<html>challenge</html>")
+    with pytest.raises(UpstreamChanged):
+        await provider.resolve(URL)
+
+# ---------- 身份来源阶梯 ----------
+def test_browser_source_is_used_when_no_cookie_file(provider: Douyin, monkeypatch):
+    """L2：没有 L1 文件时，允许从本机浏览器只读地取 UIFID（--cookies-from-browser）。"""
+    import yt_dlp.cookies as yc
+
     monkeypatch.setattr(cookies, "cookie_file", lambda platform: None)
-    seen: dict[str, object] = {}
+    monkeypatch.setattr(config.settings, "cookies_from_browser", "chrome")
 
-    async def fake_extract(url, *, platform, cookiefile=None, from_browser=None):
-        seen.update(cookiefile=cookiefile, from_browser=from_browser)
-        return fake_media()
+    class FakeCookie:
+        def __init__(self, name, value):
+            self.name, self.value = name, value
 
-    monkeypatch.setattr(engine, "extract_with_ytdlp", fake_extract)
-    await provider.resolve(URL)
-    assert seen == {"cookiefile": None, "from_browser": "chrome"}
+    class FakeJar(list):
+        pass
+
+    monkeypatch.setattr(
+        yc, "extract_cookies_from_browser", lambda browser: FakeJar([FakeCookie("sid_tt", "x"), FakeCookie("UIFID", "b" * 320)])
+    )
+    assert Douyin._uifid() == "b" * 320
+
+
+def test_browser_source_absent_returns_none(provider: Douyin, monkeypatch):
+    monkeypatch.setattr(cookies, "cookie_file", lambda platform: None)
+    monkeypatch.setattr(config.settings, "cookies_from_browser", None)
+    assert Douyin._uifid() is None
+
+
+def test_browser_read_failure_is_not_fatal(provider: Douyin, monkeypatch):
+    """Chrome 数据库被锁 / 钥匙串没授权 —— 当作"没有 UIFID"，走正常报错而不是崩。"""
+    import yt_dlp.cookies as yc
+
+    monkeypatch.setattr(cookies, "cookie_file", lambda platform: None)
+    monkeypatch.setattr(config.settings, "cookies_from_browser", "chrome")
+
+    def boom(browser):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(yc, "extract_cookies_from_browser", boom)
+    assert Douyin._uifid() is None
+
+
+def test_l1_file_wins_over_browser(provider: Douyin, monkeypatch):
+    """用户显式导入的 cookie 优先，不去翻浏览器。"""
+    import yt_dlp.cookies as yc
+
+    monkeypatch.setattr(config.settings, "cookies_from_browser", "chrome")
+    monkeypatch.setattr(yc, "extract_cookies_from_browser", lambda browser: pytest.fail("不该读浏览器"))
+    assert Douyin._uifid() == "a" * 320

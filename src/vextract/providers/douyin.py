@@ -31,6 +31,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -77,7 +78,9 @@ _TTWID_PAYLOAD = json.dumps(
     }
 )
 
-_TTWID_CACHE = Path("/tmp/.vx-ttwid-cache")
+def _ttwid_cache_path() -> Path:
+    """缓存放用户配置目录（与其它状态一致），不散落到 /tmp。"""
+    return config.settings.home / "ttwid-cache"
 
 
 def aweme_id_of(url: str) -> str | None:
@@ -148,7 +151,8 @@ class Douyin(Provider):
 
     async def _ttwid(self) -> str:
         """游客 ttwid：免费注册，可缓存复用。失败不致命（有时不校验），但不能静默当成功。"""
-        cached = _read_cache(_TTWID_CACHE)
+        path = _ttwid_cache_path()
+        cached = _read_cache(path)
         if cached:
             return cached
         try:
@@ -158,7 +162,7 @@ class Douyin(Provider):
         except httpx.HTTPError:
             token = None
         if token:
-            _write_cache(_TTWID_CACHE, token)
+            _write_cache(path, token)
             return token
         raise UpstreamChanged(
             "拿不到游客 ttwid（抖音的身份注册接口不可用）",
@@ -409,8 +413,11 @@ def _read_cache(path: Path) -> str | None:
 
 def _write_cache(path: Path, token: str) -> None:
     # 缓存写不进去不影响本次请求（只是下次要重新注册），所以不向上抛。
+    # 目录可能是新建的，所以 mkdir 也在保护范围内。
     with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(token, encoding="utf-8")
+        os.chmod(path, 0o600)
 
 
 __all__ = ["Douyin", "aweme_id_of", "encode_pairs", "sign_query", "SIGNATURE_SALT"]

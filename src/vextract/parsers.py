@@ -30,6 +30,23 @@ def sanitize_js_json(text: str) -> str:
     return _TRAILING_COMMA.sub(r"\1", text)
 
 
+_IMAGE_EXT = ("jpg", "jpeg", "png", "webp", "gif", "heic", "avif")
+
+
+def ext_of_url(url: str, default: str = "jpg") -> str:
+    """从图片 URL 猜扩展名。
+
+    直链常带查询串（`?imageView2/2/w/1080`）或裁切参数，所以只看路径部分的最后一段；
+    猜不出来时给 default——图集是按 `01.jpg` 这种名字落盘的，扩展名错会让用户打不开。
+    """
+    path = url.split("?")[0].split("#")[0]
+    tail = path.rsplit("/", 1)[-1]
+    if "." not in tail:
+        return default
+    suffix = tail.rsplit(".", 1)[-1].lower()
+    return suffix if suffix in _IMAGE_EXT else default
+
+
 def balanced_object(text: str, start: int) -> str:
     """从 start 处的 `{` 开始做括号配对，跳过字符串字面量。"""
     depth = 0

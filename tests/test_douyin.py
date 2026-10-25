@@ -20,6 +20,8 @@ from vextract.providers.douyin import (
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
+# autouse fixture 会把 _ttwid 换成假的；想在测试里测真的那份，就先在导入时抓住它。
+_ORIGINAL_TTWID = Douyin._ttwid
 URL = "https://www.douyin.com/video/6961737553342991651"
 
 
@@ -285,3 +287,72 @@ def test_l1_file_wins_over_browser(provider: Douyin, monkeypatch):
     monkeypatch.setattr(config.settings, "cookies_from_browser", "chrome")
     monkeypatch.setattr(yc, "extract_cookies_from_browser", lambda browser: pytest.fail("不该读浏览器"))
     assert Douyin._uifid() == "a" * 320
+
+
+# ---------- ttwid 缓存 ----------
+@pytest.mark.asyncio
+async def test_ttwid_is_cached_and_reused(provider: Douyin, monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(config.settings, "home", tmp_path)
+    calls = {"n": 0}
+
+    class FakeResponse:
+        status_code = 200
+
+        class cookies:
+            @staticmethod
+            def get(name):
+                return "guest-token-1"
+
+    async def fake_post(self, url, **kwargs):
+        calls["n"] += 1
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    real = _ORIGINAL_TTWID.__get__(provider)  # 绕开 autouse 的假实现
+
+    assert await real() == "guest-token-1"
+    assert await real() == "guest-token-1"
+    assert calls["n"] == 1, "第二次必须走缓存，不再打注册接口"
+    cache = tmp_path / "ttwid-cache"
+    assert cache.exists() and cache.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.asyncio
+async def test_stale_ttwid_cache_is_ignored(provider: Douyin, monkeypatch, tmp_path: Path):
+    import os
+    import time as time_module
+
+    monkeypatch.setattr(config.settings, "home", tmp_path)
+    cache = tmp_path / "ttwid-cache"
+    cache.write_text("old-token", encoding="utf-8")
+    old = time_module.time() - 4 * 24 * 3600
+    os.utime(cache, (old, old))
+
+    class FakeResponse:
+        status_code = 200
+
+        class cookies:
+            @staticmethod
+            def get(name):
+                return "fresh-token"
+
+    async def fake_post(self, url, **kwargs):
+        return FakeResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    real = _ORIGINAL_TTWID.__get__(provider)  # 绕开 autouse 的假实现
+    assert await real() == "fresh-token"  # 超过 3 天不复用
+
+
+@pytest.mark.asyncio
+async def test_ttwid_registration_failure_is_reported_not_swallowed(provider: Douyin, monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(config.settings, "home", tmp_path)
+
+    async def boom(self, url, **kwargs):
+        raise httpx.ConnectError("network down")
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", boom)
+    real = _ORIGINAL_TTWID.__get__(provider)  # 绕开 autouse 的假实现
+    with pytest.raises(UpstreamChanged) as exc:
+        await real()
+    assert "ttwid" in exc.value.message

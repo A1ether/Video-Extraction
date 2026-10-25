@@ -383,6 +383,95 @@ def test_faster_whisper_backend_enables_vad(monkeypatch, tmp_path: Path):
     assert result.text == "你好" and result.language == "zh"
 
 
+# ---------- 局部退化（逐段判重）----------
+def test_segment_loop_detected_for_repeated_char_run():
+    """实测残留：真实剧情里出现过「那我會把那套套套套套套套套」。"""
+    assert asr.looks_degenerate_segment("那我會把那套套套套套套套套套") is True
+
+
+def test_segment_loop_detected_for_short_phrase_repeat():
+    assert asr.looks_degenerate_segment("你不太好你不太好你不太好") is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "大家好，今天我們來聊聊自媒體素材怎麼整理",
+        "对对对",
+        "哈哈哈哈哈哈",          # 6 字笑声
+        "哈哈哈哈哈哈哈哈",      # 8 字笑声：仍算正常，不标
+        "好，那我們下一段再見",
+    ],
+)
+def test_normal_segments_are_not_flagged(text):
+    assert asr.looks_degenerate_segment(text) is False
+
+
+def test_suspect_segments_returns_indices():
+    segments = [
+        asr.Segment(0, 3, "第一句是正常的话，我们继续往下讲"),
+        asr.Segment(3, 6, "那我會把那套套套套套套套套套"),
+        asr.Segment(6, 9, "第三句也正常，讲的是别的内容"),
+    ]
+    assert asr.suspect_segments(segments) == [1]
+
+
+def test_transcribe_records_suspects_without_failing(monkeypatch, tmp_path: Path):
+    """整段没塌（不报错），但局部有循环时要标出来——这是 6:48 那条实测的形状。"""
+    def runner(_audio, *, model, language):
+        return asr.Transcript(
+            text="第一句正常，第二句开始循环，那我會把那套套套套套套套套套，最后一句也正常，收尾了。",
+            segments=[
+                asr.Segment(0, 4, "第一句正常，第二句开始循环"),
+                asr.Segment(4, 8, "那我會把那套套套套套套套套套"),
+                asr.Segment(8, 12, "最后一句也正常，收尾了"),
+            ],
+            language=language,
+            backend="faster_whisper",
+            model=model,
+        )
+
+    monkeypatch.setattr(asr, "is_installed", lambda name: name == "faster_whisper")
+    monkeypatch.setattr(asr, "_RUNNERS", {"faster_whisper": runner})
+    audio = tmp_path / "a.m4a"
+    audio.write_bytes(b"x")
+
+    result = asr.transcribe(audio, backend="faster_whisper")
+    assert result.suspects == [1]
+
+
+def test_markdown_lists_suspect_segments_with_timestamps():
+    transcript = asr.Transcript(
+        text="正常一句。那我會把那套套套套套套套套套。",
+        segments=[asr.Segment(0, 5, "正常一句"), asr.Segment(65, 70, "那我會把那套套套套套套套套套")],
+        backend="faster_whisper",
+        model="small",
+        suspects=[1],
+    )
+    body = asr.render_markdown(MEDIA, transcript)
+    assert "疑似退化段：1 段" in body
+    assert "## 疑似退化段" in body
+    assert "`1:05–1:10`" in body, "要带时间戳，方便回原声核对"
+    assert "那我會把那套" in body
+
+
+def test_markdown_has_no_suspect_section_when_clean():
+    body = asr.render_markdown(MEDIA, transcript((0, 3, "一句正常的话")))
+    assert "疑似退化段" not in body
+
+
+def test_srt_is_not_polluted_by_suspect_marking():
+    """字幕文件要能直接烧进视频，不能因为标注多出奇怪字符。"""
+    transcript = asr.Transcript(
+        text="那我會把那套套套套套套套套套",
+        segments=[asr.Segment(0, 2, "那我會把那套套套套套套套套套")],
+        suspects=[0],
+    )
+    srt = asr.render_srt(transcript)
+    assert srt.startswith("1\n00:00:00,000 --> 00:00:02,000\n那我會把那套")
+    assert "疑似" not in srt and "⚠" not in srt
+
+
 # ---------- 与下载链路衔接 ----------
 def audio_media() -> MediaInfo:
     return MediaInfo(

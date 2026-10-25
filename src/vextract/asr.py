@@ -57,6 +57,17 @@ _DEGENERATE_MIN_CHARS = 120
 """短文本不判重复：一句"好 好 好"不该被当成幻觉。"""
 
 
+_SEGMENT_LOOP = re.compile(r"(.{2,8}?)\1{2,}")
+"""局部循环：同一小片段（2~8 字）连着出现 3 次以上。
+
+实测残留：6:48 那条真实剧情里出现过「那我會把那套套套套套套套套」——整段重复度很低，
+所以整段判重拦不住；而这类"某一句里同一个字/词连着刷"才是逐段要抓的形状。
+
+阈值取舍：3 次重复 + 整段 ≥12 字。放宽到 3 次是为了抓住「你不太好你不太好你不太好」，
+代价是「對對對對對對對對」这种强调式重复也会被标——所以标注文案只写"疑似"，不下结论。
+"""
+
+
 def degeneracy_ratio(text: str) -> float:
     """重复度 = 1 − 唯一 4-gram 占比（0~1，越大越像循环）。
 
@@ -72,6 +83,26 @@ def degeneracy_ratio(text: str) -> float:
     if not grams:
         return 0.0
     return 1.0 - len(set(grams)) / len(grams)
+
+
+_SEGMENT_LOOP_MIN_CHARS = 12
+"""整段至少 12 字才判局部循环：`哈哈哈哈哈哈哈哈`（8 字）是正常笑声，不是幻觉。"""
+
+
+def looks_degenerate_segment(text: str) -> bool:
+    """单个字幕段是不是退化了（局部循环）。"""
+    compact = re.sub(r"\s+", "", text)
+    if len(compact) < _SEGMENT_LOOP_MIN_CHARS:
+        return False
+    if _SEGMENT_LOOP.search(compact):
+        return True
+    # 慢速循环（片段之间夹了别的字）用重复度兜底，但只对够长的段生效
+    return len(compact) >= 24 and degeneracy_ratio(compact) >= 0.6
+
+
+def suspect_segments(segments: list[Segment]) -> list[int]:
+    """返回退化段的**下标**（0-based），供渲染时标注、也方便以后重解这些段。"""
+    return [index for index, segment in enumerate(segments) if looks_degenerate_segment(segment.text)]
 
 
 def looks_degenerate(text: str) -> bool:
@@ -97,6 +128,8 @@ class Transcript:
     language: str | None = None
     backend: str = ""
     model: str = ""
+    suspects: list[int] = field(default_factory=list)
+    """局部退化段的下标。整段判重是"要不要报错"，这个只"标注哪几句不可信"。"""
 
     @property
     def duration(self) -> float | None:
@@ -255,6 +288,7 @@ def transcribe(
             "转录结果为空",
             hint="音频里可能没有人声（纯音乐/环境音）；换一条内容再试",
         )
+    result.suspects = suspect_segments(result.segments)
     if looks_degenerate(result.text):
         raise TranscribeFailed(
             "转录结果像是重复幻觉（同一段内容循环出现）",
@@ -309,7 +343,21 @@ def render_markdown(media: MediaInfo, transcript: Transcript) -> str:
             lines.append(f"- 互动：{pairs}")
     lang = f"，语言 {transcript.language}" if transcript.language else ""
     lines.append(f"- 转写：本地 {transcript.backend}（{transcript.model}）{lang}")
+    if transcript.suspects:
+        lines.append(f"- ⚠️ 疑似退化段：{len(transcript.suspects)} 段（见文末，别直接引用）")
     lines += ["", "## 正文", "", transcript.text, ""]
+    if transcript.suspects:
+        lines += [
+            "## 疑似退化段",
+            "",
+            "Whisper 在噪声/音乐/口音重的片段上会陷入局部循环；下面几段可能是幻觉，也可能是强调式重复，"
+            "引用前请对一遍原声：",
+            "",
+        ]
+        for index in transcript.suspects:
+            segment = transcript.segments[index]
+            lines.append(f"- `{_clock(segment.start)}–{_clock(segment.end)}` {segment.text}")
+        lines.append("")
     return "\n".join(lines)
 
 

@@ -135,6 +135,12 @@ def test_artifact_route_is_not_confused_with_file_route():
     assert "artifact?index=" in JS
 
 
+def test_progress_renders_counts_for_image_tasks():
+    """图集进度是"第 N/M 张"，不能当字节渲染（实测显示成 0.0/0.0 MB）。"""
+    assert 'progress.unit === "count"' in JS
+    assert "张" in JS
+
+
 def test_processing_state_is_labelled():
     assert "processing" in JS, "转码/转录阶段要有自己的状态标签"
     assert "处理中" in JS

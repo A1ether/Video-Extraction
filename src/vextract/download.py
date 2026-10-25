@@ -71,6 +71,11 @@ class Progress:
     total: int | None = None
     overall: float = 0.0
     message: str = ""
+    unit: str = "bytes"
+    """`done`/`total` 的单位：字节（默认）或张数（图集）。
+
+    不区分就会把"第 3/6 张"渲染成"3 B / 6 B"——实测图集进度条显示 0.0/0.0 MB 就是这个坑。
+    """
 
     def to_dict(self) -> dict:
         return {
@@ -79,6 +84,7 @@ class Progress:
             "total": self.total,
             "overall": round(self.overall, 4),
             "message": self.message,
+            "unit": self.unit,
         }
 
 
@@ -486,6 +492,7 @@ async def _download_images(
                         total=count,
                         overall=overall,
                         message=f"第 {position}/{count} 张",
+                        unit="count",
                     )
                 )
 

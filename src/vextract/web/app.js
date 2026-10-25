@@ -413,7 +413,9 @@ function paintTask(task, row) {
   refs.bar.style.width = `${(task.state === "done" ? 1 : overall) * 100}%`;
   refs.progress.className = `progress ${task.state === "done" ? "is-done" : task.state === "error" ? "is-error" : ""}`;
   refs.stage.textContent = (progress.stage || "排队中") + (task.state === "done" ? "" : ` · ${Math.round(overall * 100)}%`);
-  refs.speed.textContent = progress.total ? `${fmtBytes(progress.done)} / ${fmtBytes(progress.total)}` : (progress.done ? fmtBytes(progress.done) : "");
+  refs.speed.textContent = progress.unit === "count"
+    ? (progress.total ? `${progress.done}/${progress.total} 张` : (progress.done ? `${progress.done} 张` : ""))
+    : (progress.total ? `${fmtBytes(progress.done)} / ${fmtBytes(progress.total)}` : (progress.done ? fmtBytes(progress.done) : ""));
   refs.size.textContent = task.size ? `文件 ${fmtBytes(task.size)}` : "";
 
   if (task.error) {

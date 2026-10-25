@@ -353,6 +353,12 @@ def _progress(event: download.Progress) -> None:
     label = event.stage + (f"（{event.message}）" if event.message and event.stage != "完成" else "")
     done = event.done
     total = event.total
+    if event.unit == "count":
+        sys.stderr.write(f"\r{label}: {done}/{total or '?'} 张")
+        sys.stderr.flush()
+        if total and done >= total:
+            sys.stderr.write("\n")
+        return
     if total:
         pct = done / total * 100
         sys.stderr.write(f"\r{label}: {done / 1048576:.1f}/{total / 1048576:.1f} MB ({pct:.0f}%)")

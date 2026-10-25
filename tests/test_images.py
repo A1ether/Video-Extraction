@@ -253,6 +253,9 @@ async def test_download_images_writes_numbered_folder(monkeypatch, tmp_path: Pat
     assert overalls == sorted(overalls), "整组进度必须单调递增，不能每张图都从 0 跳回"
     assert seen[-1].overall == 1.0 and seen[-1].stage == "完成"
     assert [p.message for p in seen if p.stage == "下载图片"] == ["第 1/3 张", "第 2/3 张", "第 3/3 张"]
+    # 单位必须标明是"张"而不是字节：否则 CLI 会把 3/6 渲染成 "3 B / 6 B"、前端显示 0.0/0.0 MB
+    assert {p.unit for p in seen if p.stage == "下载图片"} == {"count"}
+    assert seen[-1].unit == "bytes", "完成阶段回到字节口径"
 
 
 @pytest.mark.asyncio

@@ -67,6 +67,13 @@ CAPABILITIES: list[dict[str, str]] = [
         ),
     },
     {
+        "platform": "字幕（B站 CC/AI）",
+        "resolver": "x/player/wbi/v2 的 subtitle.subtitles[]",
+        "auth": "**需要登录态 SESSDATA**（匿名恒为空且 need_login_subtitle=true）",
+        "merge": "不需要（落成 .srt）",
+        "verified": "✅ 2026-10-25 登录态实测：12 轨 / 2 轨 / 1 轨，真下 .srt 2.9K 时间戳正确",
+    },
+    {
         "platform": "本地转录（音频 → 文字稿）",
         "resolver": "自研 asr.py（mlx-whisper / faster-whisper / whisper 级联）",
         "auth": "不涉及平台登录态",

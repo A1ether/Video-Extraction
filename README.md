@@ -63,6 +63,7 @@ alias vxg='open "http://127.0.0.1:8787/?text=$(python3 -c "import urllib.parse,s
 | 视频 | `<作者>_<标题>_<ID>.mp4` | DASH 平台（B站/YouTube）自动 ffmpeg 无损合并 |
 | 仅音频 | `.m4a` / `.mp3` / `.flac` | DASH 平台直接下自带音轨；单文件 mp4 平台用 ffmpeg 抽。**源已是 aac 且要 m4a 时不重编码**；默认把标题/作者/原链接写进标签（`--no-tags` 关掉） |
 | 图集 | `<作者>_<标题>_<ID>/01.jpg…` | 图文作品（微博实测 18 张；抖音/小红书解析已实现、待线上正例） |
+| 字幕 | `<同名>.<语言码>.srt` | B站 CC/AI 字幕（**需登录态**，匿名恒为空）。`--subs auto` 按偏好挑一条，或 `--subs zh-CN,en-US` 指定；没有字幕时可以直接用本地转录生成 |
 | 本地转录 | `<同名>.md/.txt/.srt` | 音频落盘后跑本地 ASR；`--transcribe` 开启，需可选依赖（见下）。非人声素材（纯音乐/环境音）会让 Whisper 陷入重复循环，这时换 `--asr-backend faster_whisper`（自带 VAD） |
 
 ```bash
@@ -74,6 +75,9 @@ uv run vx get "<分享文本>" --mode audio --transcribe --asr-language zh
 uv run vx get "<分享文本>" --mode audio --transcribe --asr-backend faster_whisper --asr-model small
 # 图文作品（也可以不给 --mode：图文会自动推断成图集）
 uv run vx get "<图文分享文本>" --mode images
+# 顺带存字幕（B站 CC 字幕要登录态；可先从浏览器只读 cookie）
+uv run vx get "<B站链接>" --cookies-from-browser chrome --subs zh-CN
+uv run vx get "<B站链接>" --subs auto --mode audio
 ```
 
 本地转录依赖是**可选**的，不装也能用其它模式：
@@ -122,13 +126,13 @@ curl -s -o 文字稿.md 'localhost:8787/tasks/<id>/artifact?index=0&attachment=1
 
 ## 平台能力（截至 2026-10-25 实测）
 
-| 平台 | 解析方式 | 鉴权 | 需要 ffmpeg 合并 | 图文（图集） |
+| 平台 | 解析方式 | 鉴权 | 需要 ffmpeg 合并 | 图文（图集） / 字幕 |
 |---|---|---|---|---|
-| B站 | 自研（WBI 签名 + playurl） | 可选，SESSDATA 解锁 1080P+ | **是**（DASH 分离）；音频模式自带纯音轨 | — |
+| B站 | 自研（WBI 签名 + playurl） | 可选，SESSDATA 解锁 1080P+ **与字幕** | **是**（DASH 分离）；音频模式自带纯音轨 | 字幕 ✅ 登录态实测 12/2/1 轨 |
 | 微博 | 自研（游客墙 + statuses/show） | 免登录 | 否 | ✅ 实测 18 张图（`pic_infos` 7 档，按面积取最大） |
 | 快手 | 自研（移动页 `window.INIT_STATE`） | 公开作品免登录 | 否 | — |
 | 小红书 | 自研（`__INITIAL_STATE__`） | 需分享文本里的 `xsec_token` | 否 | ⚠️ 解析实现 + fixture 覆盖，待一条未失效链接 |
-| 抖音 | 自研（详情接口 + 本机算签名） | **需要一次浏览器身份 UIFID**，之后复用 | 否 | ⚠️ 同上（样本作品是视频，字段形状按 `url_list` 约定实现） |
+| 抖音 | 自研（详情接口 + 本机算签名） | **需要一次浏览器身份 UIFID**，之后复用 | 否 | ✅ 实测 8/10 条有图（`url_list` 无水印） |
 | YouTube/TikTok | yt-dlp | 可选 | YouTube 是 | — |
 | 视频号 | 未实现（见 P2） | 需 MITM 证书 + 系统代理 | — | — |
 

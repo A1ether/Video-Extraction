@@ -32,9 +32,23 @@ _QN_LABEL = {
     80: "1080P", 74: "720P60", 64: "720P", 32: "480P", 16: "360P",
 }
 _BV_RE = re.compile(r"BV[0-9A-Za-z]{10}")
+_PAGE_RE = re.compile(r"[?&]p=(\d+)")
 _AV_RE = re.compile(r"/av(\d+)")
 
 WEB_REFERER = {"Referer": "https://www.bilibili.com/"}
+
+
+def _page_of(url: str) -> int:
+    """链接里的 ?p=N（1-based）。没有就当第 1 个分P。"""
+    match = _PAGE_RE.search(url)
+    return max(1, int(match.group(1))) if match else 1
+
+
+def _clock(seconds: float | int | None) -> str:
+    total = int(seconds or 0)
+    if total >= 3600:
+        return f"{total // 3600}:{(total % 3600) // 60:02d}:{total % 60:02d}"
+    return f"{total // 60}:{total % 60:02d}"
 
 
 def mixin_key(img_key: str, sub_key: str) -> str:
@@ -84,7 +98,8 @@ class Bilibili(Provider):
                     platform="bilibili",
                 )
             data = payload["data"]
-            streams, note = await self._playurl(cli, data["bvid"], data["cid"])
+            cid, page_duration, page_note = self._select_page(data, _page_of(url))
+            streams, note = await self._playurl(cli, data["bvid"], cid)
 
         videos = sorted(
             [s for s in streams if not s.audio_only],
@@ -103,7 +118,7 @@ class Bilibili(Provider):
             title=data.get("title") or "untitled",
             author=(data.get("owner") or {}).get("name"),
             cover_url=data.get("pic"),
-            duration=float(data["duration"]) if data.get("duration") else None,
+            duration=page_duration,
             stats={
                 k: int(stat[src])
                 for k, src in (
@@ -117,9 +132,47 @@ class Bilibili(Provider):
             },
             streams=videos[:6] + audios[:3],
             needs_merge=bool(audios),
-            quality_note=note,
-            extra={"aid": data.get("aid"), "cid": data.get("cid"), "bvid": data.get("bvid")},
+            quality_note="\n".join(part for part in (note, page_note) if part) or None,
+            extra={
+                "aid": data.get("aid"),
+                "cid": cid,
+                "bvid": data.get("bvid"),
+                "pages": len(data.get("pages") or []),
+                "page": _page_of(url),
+            },
         )
+
+    @staticmethod
+    def _select_page(data: dict, page_no: int) -> tuple[int, float | None, str | None]:
+        """选集：多分P（合集）视频只解析一个 P。
+
+        实测踩过：`BV1JE411N7UD` 是 21 个分P 的合集，`view.duration` 是**总时长**
+        （7330s），而 `data["cid"]` 只是第 1 分P（564s）。旧实现拿总时长当 duration、
+        只用第 1 分P 的流 → 界面写着 122:10、产物却只有 9 分钟，属于"静默给错东西"。
+        现在：按链接里的 `?p=N` 选分P，duration 用**那一个分P**的时长，并把"合集"写进提示。
+        """
+        pages = [item for item in (data.get("pages") or []) if isinstance(item, dict)]
+        if not pages:
+            duration = data.get("duration")
+            return int(data.get("cid") or 0), float(duration) if duration else None, None
+
+        index = max(1, min(page_no, len(pages)))
+        page = pages[index - 1]
+        cid = int(page.get("cid") or data.get("cid") or 0)
+        duration = page.get("duration") or data.get("duration")
+        note = None
+        if len(pages) > 1:
+            total = data.get("duration")
+            note = (
+                f"这是 {len(pages)} 个分P 的合集"
+                + (f"（总时长 {_clock(total)}）" if total else "")
+                + f"，本次只处理第 {index} 分P（{page.get('part') or ''}"
+                + (f" · {_clock(duration)}" if duration else "")
+                + "）；要其它分P 请在链接后加 ?p=N"
+            )
+            if page_no > len(pages):
+                note = f"链接里的 p={page_no} 超出范围（共 {len(pages)} 个分P），已回退到最后一个分P。" + note
+        return cid, float(duration) if duration else None, note
 
     # --- 内部 ---
     @staticmethod

@@ -35,6 +35,54 @@ def test_sign_wbi_filters_forbidden_chars():
     assert a["w_rid"] == b["w_rid"]
 
 
+# ---------- 多分P 合集（实测踩到：界面写 122:10，产物只有 9 分钟）----------
+def multi_page_view() -> dict:
+    return {
+        "bvid": "BV1JE411N7UD",
+        "cid": 166782869,
+        "duration": 7330,          # 合集总时长（21 个分P）
+        "pages": [
+            {"cid": 166782869, "page": 1, "part": "开头", "duration": 564},
+            {"cid": 166789445, "page": 2, "part": "序章1", "duration": 513},
+            {"cid": 166837283, "page": 3, "part": "序章2", "duration": 408},
+        ],
+    }
+
+
+def test_single_page_uses_view_duration():
+    cid, duration, note = Bilibili._select_page({"cid": 137649199, "duration": 213, "pages": [{"cid": 137649199, "duration": 213}]}, 1)
+    assert (cid, duration, note) == (137649199, 213.0, None), "单P 视频不该冒出合集提示"
+
+
+def test_multi_page_uses_the_selected_page_duration_and_says_so():
+    cid, duration, note = Bilibili._select_page(multi_page_view(), 1)
+    assert cid == 166782869
+    assert duration == 564.0, "duration 必须是这一分P 的时长，不是合集总时长"
+    assert note and "3 个分P" in note and "第 1 分P" in note
+    assert "2:02:10" in note, "提示里要说清合集总时长（7330s），用户才知道自己只下了一段"
+    assert "?p=" in note, "要告诉用户怎么拿其它分P"
+
+
+def test_page_param_selects_that_page():
+    view = multi_page_view()
+    cid, duration, _ = Bilibili._select_page(view, 2)
+    assert cid == 166789445 and duration == 513.0
+
+
+def test_page_param_out_of_range_falls_back_and_warns():
+    cid, duration, note = Bilibili._select_page(multi_page_view(), 99)
+    assert cid == 166837283 and duration == 408.0
+    assert note and "超出范围" in note
+
+
+def test_page_of_reads_query():
+    from vextract.providers.bilibili import _page_of
+
+    assert _page_of("https://www.bilibili.com/video/BV1JE411N7UD") == 1
+    assert _page_of("https://www.bilibili.com/video/BV1JE411N7UD?p=3") == 3
+    assert _page_of("https://www.bilibili.com/video/BV1JE411N7UD?spm=x&p=12") == 12
+
+
 @pytest.mark.parametrize(
     ("url", "bvid", "aid"),
     [

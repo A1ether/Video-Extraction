@@ -180,11 +180,24 @@ def test_lower_gear_is_marked_so_users_do_not_pick_it_as_best(provider: Douyin, 
     assert low[0].rank < media.streams[0].rank
 
 
-def test_images_only_post_is_no_media(provider: Douyin, detail: dict):
-    post = {**detail, "video": {}, "images": [{"url_list": ["https://x/1.jpg"]}]}
-    with pytest.raises(NoMedia) as exc:
+def test_images_only_post_becomes_assets(provider: Douyin, detail: dict):
+    """图文作品以前被当成错误（NO_MEDIA），现在解析成图集——行为变更见 docs/03。"""
+    post = {
+        **detail,
+        "video": {},
+        "images": [{"url_list": ["https://x/1.jpg", "https://y/1.jpg"], "width": 1080, "height": 1440}],
+    }
+    media = provider._to_media(post, "1")
+    assert media.is_image_post and media.streams == []
+    assert [a.url for a in media.assets] == ["https://x/1.jpg"], "url_list 取第一个直链"
+    assert media.assets[0].width == 1080 and media.assets[0].height == 1440
+    assert "图集" in (media.quality_note or "")
+
+
+def test_post_with_neither_video_nor_images_is_no_media(provider: Douyin, detail: dict):
+    post = {**detail, "video": {}, "images": []}
+    with pytest.raises(NoMedia):
         provider._to_media(post, "1")
-    assert "图文" in exc.value.message
 
 
 # ---------- 失败路径 ----------

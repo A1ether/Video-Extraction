@@ -42,7 +42,8 @@ import httpx
 from .. import config, cookies
 from ..download import rank_of
 from ..errors import AuthRequired, NoMedia, RateLimited, UpstreamChanged
-from ..models import MediaInfo, Stream
+from ..models import Asset, MediaInfo, Stream
+from ..parsers import ext_of_url
 from .base import Provider
 
 # Argus / secsdk 的固定 salt（douyin_web 项目的 project-id=34）。
@@ -239,17 +240,11 @@ class Douyin(Provider):
     def _to_media(self, detail: dict, aweme_id: str) -> MediaInfo:
         video = detail.get("video") or {}
         streams = self._streams(video)
-        images = detail.get("images") or []
-        if not streams:
-            if images:
-                raise NoMedia(
-                    "这是图文作品，没有视频流",
-                    hint="图文作品暂不支持下载（本项目只处理视频）",
-                    platform="douyin",
-                )
+        assets = self._assets(detail)
+        if not streams and not assets:
             raise NoMedia(
-                "作品没有可用码流",
-                hint="确认链接指向视频作品；若浏览器能播，说明接口字段变了，请反馈",
+                "作品既没有视频也没有图片",
+                hint="确认链接指向视频/图文作品；若浏览器能播，说明接口字段变了，请反馈",
                 platform="douyin",
             )
 
@@ -278,9 +273,42 @@ class Douyin(Provider):
             duration=float(duration_ms) / 1000 if isinstance(duration_ms, (int, float)) and duration_ms > 0 else None,
             stats=stats,
             streams=streams,
+            assets=assets,
             needs_merge=False,  # 抖音给的是音视频一体的 mp4
+            quality_note=None if streams else f"这条是图文作品（{len(assets)} 张图）：下载走图集模式",
             extra={"aweme_type": detail.get("aweme_type"), "is_h265": video.get("is_h265")},
         )
+
+    @staticmethod
+    def _assets(detail: dict) -> list[Asset]:
+        """抖音图文：`images[]` 每项与 `video.cover` 是同一套 url_list 结构。
+
+        实测口径：本机能拿到的样本作品是视频（`images`/`image_list` 都为空），
+        图文作品的字段形状按同一套 url_list 约定实现（`url_list[0]` 为直链）。
+        线上正例待一条未失效的图文链接来定案，见 docs/03。
+        """
+        entries = detail.get("images") or detail.get("image_list") or []
+        out: list[Asset] = []
+        for index, entry in enumerate(entries, start=1):
+            if not isinstance(entry, dict):
+                continue
+            urls = [item for item in (entry.get("url_list") or []) if isinstance(item, str) and item]
+            if not urls and isinstance(entry.get("url"), str):
+                urls = [entry["url"]]
+            if not urls:
+                continue
+            width, height = entry.get("width"), entry.get("height")
+            out.append(
+                Asset(
+                    url=urls[0],
+                    index=index,
+                    ext=ext_of_url(urls[0]),
+                    width=int(width) if isinstance(width, int) else None,
+                    height=int(height) if isinstance(height, int) else None,
+                    headers={"Referer": REFERER},
+                )
+            )
+        return out
 
     @staticmethod
     def _streams(video: dict) -> list[Stream]:

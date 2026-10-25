@@ -15,8 +15,8 @@ import re
 from .. import http
 from ..download import rank_of
 from ..errors import NoMedia
-from ..models import MediaInfo, Stream
-from ..parsers import deep_find, extract_js_object, first_key
+from ..models import Asset, MediaInfo, Stream
+from ..parsers import deep_find, ext_of_url, extract_js_object, first_key
 from .base import Provider
 
 _ID_RE = re.compile(r"/(?:explore|discovery/item|user/profile/[^/]+)/([0-9a-zA-Z]{16,32})")
@@ -67,10 +67,11 @@ class Xiaohongshu(Provider):
 
         video = note.get("video") or {}
         streams = self._streams(video)
-        if not streams:
+        assets = self._assets(note)
+        if not streams and not assets:
             raise NoMedia(
-                "这条笔记是图文，没有视频",
-                hint="小红书图文请用图集模式（本期未实现）",
+                "这条笔记既没有视频也没有图片",
+                hint="常见原因：① 分享链接里的 xsec_token 丢了 ② 笔记被删/仅自己可见 ③ 需要登录",
                 platform="xhs",
             )
 
@@ -96,11 +97,46 @@ class Xiaohongshu(Provider):
                 if str(interact.get(src, "")).isdigit()
             },
             streams=streams,
+            assets=assets,
             needs_merge=False,
+            quality_note=None if streams else f"这条是图文笔记（{len(assets)} 张图）：下载走图集模式",
             extra={"xsec_token_present": bool(token)},
         )
 
     # --- 内部 ---
+    @staticmethod
+    def _assets(note: dict) -> list[Asset]:
+        """小红书图文：`imageList[]` 的 `urlDefault` 是默认图（无水印档）。
+
+        `urlPre` 是带水印的预览图，永远不要用它。`urlDefault` 有时会挂
+        `?imageView2/...` 这类裁切参数（会缩小尺寸），发现就剥掉换原图。
+        实测口径：线上正例待一条未失效的分享链接，见 docs/03。
+        """
+        images = note.get("imageList")
+        if not isinstance(images, list):
+            return []
+        out: list[Asset] = []
+        for index, item in enumerate(images, start=1):
+            if not isinstance(item, dict):
+                continue
+            url = first_key(item, "urlDefault", "url")
+            if not isinstance(url, str) or not url:
+                continue
+            if "imageView2" in url:
+                url = url.split("?")[0]
+            width, height = item.get("width"), item.get("height")
+            out.append(
+                Asset(
+                    url=url,
+                    index=index,
+                    ext=ext_of_url(url),
+                    width=int(width) if isinstance(width, int) else None,
+                    height=int(height) if isinstance(height, int) else None,
+                    headers={"Referer": "https://www.xiaohongshu.com/"},
+                )
+            )
+        return out
+
     @staticmethod
     def _xsec_token(url: str) -> str | None:
         match = re.search(r"[?&]xsec_token=([^&]+)", url)

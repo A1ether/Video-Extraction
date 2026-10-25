@@ -1,0 +1,93 @@
+{
+ "id": "0000000000000000",
+ "mid": "0000000000000000",
+ "text_raw": "光影折射出霓虹，节拍奏声起，此刻我们都在这里（fixture：文字已替换）",
+ "user": {
+  "idstr": "1000000000",
+  "screen_name": "某用户"
+ },
+ "attitudes_count": 1000,
+ "comments_count": 100,
+ "reposts_count": 50,
+ "pic_num": 2,
+ "pic_ids": [
+  "STUBPID01",
+  "STUBPID02"
+ ],
+ "pic_infos": {
+  "STUBPID01": {
+   "thumbnail": {
+    "url": "https://wx4.sinaimg.cn/wap180/STUBPID01.jpg",
+    "width": 180,
+    "height": 101
+   },
+   "bmiddle": {
+    "url": "https://wx4.sinaimg.cn/wap360/STUBPID01.jpg",
+    "width": 360,
+    "height": 202
+   },
+   "large": {
+    "url": "https://wx4.sinaimg.cn/orj960/STUBPID01.jpg",
+    "width": 1706,
+    "height": 960
+   },
+   "original": {
+    "url": "https://wx4.sinaimg.cn/orj1080/STUBPID01.jpg",
+    "width": 1920,
+    "height": 1080
+   },
+   "largest": {
+    "url": "https://wx4.sinaimg.cn/large/STUBPID01.jpg",
+    "width": 2048,
+    "height": 1152
+   },
+   "mw2000": {
+    "url": "https://wx4.sinaimg.cn/mw2000/STUBPID01.jpg",
+    "width": 2000,
+    "height": 1125
+   },
+   "largecover": {
+    "url": "https://wx4.sinaimg.cn/orj960/STUBPID01.jpg",
+    "width": 1706,
+    "height": 960
+   }
+  },
+  "STUBPID02": {
+   "thumbnail": {
+    "url": "https://wx1.sinaimg.cn/wap180/STUBPID02.jpg",
+    "width": 180,
+    "height": 120
+   },
+   "bmiddle": {
+    "url": "https://wx1.sinaimg.cn/wap360/STUBPID02.jpg",
+    "width": 360,
+    "height": 240
+   },
+   "large": {
+    "url": "https://wx1.sinaimg.cn/orj960/STUBPID02.jpg",
+    "width": 1440,
+    "height": 960
+   },
+   "original": {
+    "url": "https://wx1.sinaimg.cn/orj1080/STUBPID02.jpg",
+    "width": 1620,
+    "height": 1080
+   },
+   "largest": {
+    "url": "https://wx1.sinaimg.cn/large/STUBPID02.jpg",
+    "width": 2048,
+    "height": 1365
+   },
+   "mw2000": {
+    "url": "https://wx1.sinaimg.cn/mw2000/STUBPID02.jpg",
+    "width": 2000,
+    "height": 1333
+   },
+   "largecover": {
+    "url": "https://wx1.sinaimg.cn/orj960/STUBPID02.jpg",
+    "width": 1440,
+    "height": 960
+   }
+  }
+ }
+}

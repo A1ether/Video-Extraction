@@ -15,7 +15,8 @@ import re
 from .. import http
 from ..download import rank_of
 from ..errors import AuthRequired, NoMedia, UpstreamChanged
-from ..models import MediaInfo, Stream
+from ..models import Asset, MediaInfo, Stream
+from ..parsers import ext_of_url
 from .base import Provider
 
 _B62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -110,8 +111,13 @@ class Weibo(Provider):
 
         media = ((data.get("page_info") or {}).get("media_info")) or {}
         streams = self._streams(media)
-        if not streams:
-            raise NoMedia("该微博没有视频（可能是纯图文）", hint="确认这条微博含视频", platform="weibo")
+        assets = self._assets(data)
+        if not streams and not assets:
+            raise NoMedia(
+                "该微博既没有视频也没有图片",
+                hint="确认链接指向含媒体内容的微博（纯文字微博没有可下载的东西）",
+                platform="weibo",
+            )
 
         user = data.get("user") or {}
         stats = {
@@ -125,13 +131,50 @@ class Weibo(Provider):
             source_url=f"https://m.weibo.cn/status/{mid}",
             title=_clean(data.get("text_raw") or data.get("text"))[:120] or f"weibo-{mid}",
             author=user.get("screen_name"),
-            cover_url=media.get("cover_image") or media.get("cover_image_url"),
+            cover_url=media.get("cover_image") or media.get("cover_image_url") or (assets[0].url if assets else None),
             duration=self._duration(media),
             stats=stats,
             streams=streams,
+            assets=assets,
             needs_merge=False,
+            quality_note=None if streams else f"这条是图文微博（{len(assets)} 张图）：下载走图集模式",
             extra={"mid": mid, "uid": user.get("idstr")},
         )
+
+    @staticmethod
+    def _assets(data: dict) -> list[Asset]:
+        """图文微博：`pic_ids` 给出顺序，`pic_infos[pid]` 给每个 pid 的各档链接。
+
+        实测同一 pid 有 7 档（thumbnail 180x101 / bmiddle 360x202 / large 1706x960 /
+        original 1920x1080 / largest 2048x1152 / mw2000 2000x1125 / largecover 1706x960）。
+        **按 width×height 挑最大的一档**，不要按字段名猜"哪个是原图"。
+        """
+        infos = data.get("pic_infos") or {}
+        if not isinstance(infos, dict):
+            return []
+        ordered = [str(pid) for pid in (data.get("pic_ids") or []) if str(pid) in infos] or list(infos)
+        out: list[Asset] = []
+        for index, pid in enumerate(ordered, start=1):
+            entry = infos.get(pid) or {}
+            variants = [
+                value for value in entry.values()
+                if isinstance(value, dict) and isinstance(value.get("url"), str)
+            ]
+            if not variants:
+                continue
+            best = max(variants, key=lambda item: int(item.get("width") or 0) * int(item.get("height") or 0))
+            url = str(best["url"])
+            out.append(
+                Asset(
+                    url=url,
+                    index=index,
+                    ext=ext_of_url(url),
+                    width=int(best["width"]) if isinstance(best.get("width"), int) else None,
+                    height=int(best["height"]) if isinstance(best.get("height"), int) else None,
+                    headers={"Referer": "https://weibo.com/"},
+                )
+            )
+        return out
 
     @staticmethod
     def _duration(media: dict) -> float | None:

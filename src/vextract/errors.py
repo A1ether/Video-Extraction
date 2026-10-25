@@ -89,3 +89,10 @@ class DownloadFailed(VextractError):
 class Cancelled(VextractError):
     code = "CANCELLED"
     http_status = 499
+
+
+class CookieExportInvalid(VextractError):
+    """浏览器导出的 cookie 文件读不了/没有可用行。"""
+
+    code = "COOKIE_EXPORT_INVALID"
+    http_status = 400

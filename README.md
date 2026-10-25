@@ -63,13 +63,15 @@ alias vxg='open "http://127.0.0.1:8787/?text=$(python3 -c "import urllib.parse,s
 | 视频 | `<作者>_<标题>_<ID>.mp4` | DASH 平台（B站/YouTube）自动 ffmpeg 无损合并 |
 | 仅音频 | `.m4a` / `.mp3` / `.flac` | DASH 平台直接下自带音轨；单文件 mp4 平台用 ffmpeg 抽。**源已是 aac 且要 m4a 时不重编码**；默认把标题/作者/原链接写进标签（`--no-tags` 关掉） |
 | 图集 | `<作者>_<标题>_<ID>/01.jpg…` | 图文作品（微博实测 18 张；抖音/小红书解析已实现、待线上正例） |
-| 本地转录 | `<同名>.md/.txt/.srt` | 音频落盘后跑本地 ASR；`--transcribe` 开启，需可选依赖（见下） |
+| 本地转录 | `<同名>.md/.txt/.srt` | 音频落盘后跑本地 ASR；`--transcribe` 开启，需可选依赖（见下）。非人声素材（纯音乐/环境音）会让 Whisper 陷入重复循环，这时换 `--asr-backend faster_whisper`（自带 VAD） |
 
 ```bash
 # 只要音频（mp3）
 uv run vx get "<分享文本>" --mode audio --audio-format mp3
 # 音频 + 中文文字稿
 uv run vx get "<分享文本>" --mode audio --transcribe --asr-language zh
+# 非人声素材（音乐/环境音）换 faster-whisper：自带 VAD，会先剔掉无人声段
+uv run vx get "<分享文本>" --mode audio --transcribe --asr-backend faster_whisper --asr-model small
 # 图文作品（也可以不给 --mode：图文会自动推断成图集）
 uv run vx get "<图文分享文本>" --mode images
 ```

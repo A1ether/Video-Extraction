@@ -414,6 +414,25 @@ def test_task_artifact_route_serves_indexed_files(client, isolated_home, tmp_pat
     assert len(listing["artifacts"]) == 2
 
 
+def test_shutdown_runs_after_response_for_loopback(client, monkeypatch):
+    calls: list[bool] = []
+    monkeypatch.setattr("vextract.api.app._request_shutdown", lambda: calls.append(True))
+
+    resp = client.post("/shutdown")
+
+    assert resp.status_code == 200
+    assert calls == [True], "BackgroundTasks 应当在响应发出后执行退出"
+
+
+def test_shutdown_rejects_non_loopback(client, monkeypatch):
+    monkeypatch.setattr("vextract.api.app._is_loopback_client", lambda host: False)
+
+    resp = client.post("/shutdown")
+
+    assert resp.status_code == 403
+    assert "本机" in resp.json()["detail"]
+
+
 def test_task_file_on_directory_says_use_artifact_route(client, isolated_home, tmp_path: Path):
     folder = tmp_path / "图集"
     folder.mkdir()

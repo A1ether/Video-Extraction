@@ -12,7 +12,9 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -22,7 +24,7 @@ from urllib.parse import quote
 from urllib.parse import urlparse as parse_url
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -100,6 +102,33 @@ async def health() -> dict:
         "ffmpeg": download.ffmpeg_path(),
         "out_dir": str(config.settings.out_dir),
     }
+
+
+def _is_loopback_client(host: str | None) -> bool:
+    """退出接口只允许本机调用；TestClient 的 host 是 "testclient"，不是 IP。"""
+    if not host:
+        return False
+    if host in ("localhost", "testclient"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _request_shutdown() -> None:
+    """在响应发出之后由 BackgroundTasks 调用，让 uvicorn 走正常关闭流程。"""
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+@app.post("/shutdown")
+async def shutdown(request: Request, background: BackgroundTasks) -> dict:
+    """前端「退出」按钮用的接口；防止把绑在 0.0.0.0 的服务暴露成远端关机入口。"""
+    host = request.client.host if request.client else None
+    if not _is_loopback_client(host):
+        raise HTTPException(status_code=403, detail="只允许本机退出")
+    background.add_task(_request_shutdown)
+    return {"ok": True}
 
 
 @app.get("/doctor")

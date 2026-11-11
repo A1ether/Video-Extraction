@@ -781,6 +781,17 @@ $("#btn-save-settings").addEventListener("click", async () => {
   }
 });
 
+$("#btn-shutdown").addEventListener("click", async () => {
+  if (!confirm("确定退出 vextract 服务？正在下载的任务会中断。")) return;
+  try {
+    await api("/shutdown", { method: "POST" });
+    $("#btn-shutdown").disabled = true;
+    toast("服务已退出，可以关闭这个页面了", "ok", 8000);
+  } catch (err) {
+    toast(`退出失败：${err.message}`, "error");
+  }
+});
+
 $("#btn-refresh").addEventListener("click", async () => { await loadTasks(); toast("已刷新", "ok"); });
 $("#btn-clear-finished").addEventListener("click", async () => {
   try {

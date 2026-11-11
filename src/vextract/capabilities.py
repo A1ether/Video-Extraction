@@ -78,7 +78,10 @@ CAPABILITIES: list[dict[str, str]] = [
         "resolver": "自研 asr.py（mlx-whisper / faster-whisper / whisper 级联）",
         "auth": "不涉及平台登录态",
         "merge": "需要 ffmpeg 先出音频（可选依赖另装）",
-        "verified": "✅ 2026-10-25 抖音 19.7s 样本端到端（音频 313KB + 文字稿 .md）；默认 large-v3-turbo 未下载实测",
+        "verified": (
+            "✅ 2026-10-25 抖音 19.7s 样本端到端（音频 313KB + 文字稿 .md）；"
+            "默认 large-v3-turbo 已真下载实测：8 句命中 7 句（第 7 句整句漏转），不是零错字"
+        ),
     },
     {
         "platform": "其他 1700+ 站点",

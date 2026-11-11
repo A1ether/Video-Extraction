@@ -7,6 +7,7 @@ dist/
 build/
 *.egg-info/
 .env
+.asr_compare.json
 .vx-*/
 docs/research/raw/src_read/
 .DS_Store

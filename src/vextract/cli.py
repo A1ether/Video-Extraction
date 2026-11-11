@@ -316,7 +316,18 @@ def _serve_once(host: str, port: int, url: str, open_browser: bool) -> None:
 
     import uvicorn
 
-    config = uvicorn.Config("vextract.api.app:app", host=host, port=port, log_level="info")
+    from .api.app import app as fastapi_app
+
+    # 传 app 对象而不是 "vextract.api.app:app" 字符串：PyInstaller 冻结后
+    # uvicorn 的字符串导入路径会解析失败，直接给对象两条路都通。
+    # SSE 是长连接：不设超时的话，退出时会一直卡在 "Waiting for connections to close"。
+    config = uvicorn.Config(
+        fastapi_app,
+        host=host,
+        port=port,
+        log_level="info",
+        timeout_graceful_shutdown=2.0,
+    )
     server = uvicorn.Server(config)
 
     async def run() -> None:

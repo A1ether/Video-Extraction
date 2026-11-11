@@ -176,6 +176,38 @@ uv run vx get "<链接>" --cookies-from-browser chrome
 
 ## 开发
 
+### macOS 应用（双击启动）
+
+**本机轻量版**（复用现有 `.venv`，体积 0.5MB，适合开发机）：
+
+```bash
+uv run python scripts/build_macos_app.py     # 打包并安装到 ~/Applications/vextract.app
+open ~/Applications/vextract.app             # 或直接在访达里双击
+```
+
+启动器复用项目现有的 `.venv`（本地转录等可选能力原样保留），所以 app 与项目目录绑定；
+移动项目后重新跑一次脚本即可。服务已在运行时再双击，只会把浏览器叫到界面，不会起第二个服务。
+
+**独立版**（可拷到别的 Apple Silicon Mac 直接跑，自带 Python、依赖、faster-whisper 与 ffmpeg）：
+
+```bash
+uv run python scripts/build_standalone_app.py
+# 产出：
+#   build/standalone/dist/vextract-<version>-macos-arm64.dmg   （拖进「应用程序」）
+#   build/standalone/dist/vextract-<version>-macos-arm64.zip
+#   ~/Applications/vextract.app                                 （本机安装）
+```
+
+- 要求 macOS 13+ / Apple Silicon（arm64）；app 约 238MB，zip 约 96MB，DMG 约 111MB。
+- 首次使用本地转录时仍会联网下载模型权重（默认 `large-v3-turbo` 约 1.5GB）。
+- 随包的 ffmpeg 来自 Homebrew（GPL-3.0-or-later）。自己用/私下拷贝没问题；若公开分发，
+  应换成 LGPL 构建，或改为要求系统自备 ffmpeg。
+- 未做 Apple 公证。拷到别的 Mac 首次打开若被 Gatekeeper 拦：右键 → 打开，或
+  `xattr -dr com.apple.quarantine /Applications/vextract.app`。
+
+两种 app 的日志都在 `~/Library/Logs/vextract.log`；在「设置」页点「退出 vextract 服务」即可停止
+（服务端只接受本机请求；Dock 图标不处理 AppleScript Quit，别用 Cmd+Q 等它）。
+
 ```bash
 uv run pytest              # 离线测试（含前端 HTML/JS/路由一致性检查，不碰网络）
 uv run pytest -m live      # 真机测试（会访问真实平台）

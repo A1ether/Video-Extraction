@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .. import asr, capabilities, config, cookies, download, engine, registry
+from .. import __version__, asr, capabilities, config, cookies, download, engine, registry
 from ..errors import VextractError
 from ..models import AudioFormat, Mode, TranscriptFormat
 from ..tasks import TERMINAL, manager
@@ -50,7 +50,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="vextract", version="0.3.0", description="自媒体视频提取 API + 前端", lifespan=lifespan)
+app = FastAPI(title="vextract", version=__version__, description="自媒体视频提取 API + 前端", lifespan=lifespan)
 
 
 class ExtractRequest(BaseModel):

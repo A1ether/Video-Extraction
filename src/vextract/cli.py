@@ -354,7 +354,14 @@ def _serve_once(host: str, port: int, url: str, open_browser: bool) -> None:
             if not ready:
                 console.print(f"[yellow]服务已监听 {url}，但探活不通过，未自动打开浏览器[/yellow]")
                 return
-            console.print(f"[bold green]vextract 已就绪[/bold green] → 在浏览器打开 [cyan]{url}[/cyan]（Ctrl+C 停止）")
+            if open_browser:
+                console.print(
+                    f"[bold green]vextract 已就绪[/bold green] → 在浏览器打开 [cyan]{url}[/cyan]（Ctrl+C 停止）"
+                )
+            else:
+                console.print(
+                    f"[bold green]vextract 已就绪[/bold green] → [cyan]{url}[/cyan]（未自动打开浏览器）"
+                )
             if open_browser:
                 import contextlib
                 import webbrowser

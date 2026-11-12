@@ -205,8 +205,11 @@ uv run python scripts/build_standalone_app.py
 - 未做 Apple 公证。拷到别的 Mac 首次打开若被 Gatekeeper 拦：右键 → 打开，或
   `xattr -dr com.apple.quarantine /Applications/vextract.app`。
 
-两种 app 的日志都在 `~/Library/Logs/vextract.log`；在「设置」页点「退出 vextract 服务」即可停止
-（服务端只接受本机请求；Dock 图标不处理 AppleScript Quit，别用 Cmd+Q 等它）。
+两种 app 的启动器打开界面后**立即退出**，服务在后台常驻：关掉浏览器不会停服务，
+再双击 app 只会重新打开界面，不会起第二个服务。日志在 `~/Library/Logs/vextract.log`。
+
+停止服务：在「设置」页点「退出 vextract 服务」（服务端只接受本机请求）；浏览器已经关掉时，
+用「活动监视器」结束 `vextract` 进程即可。
 
 ```bash
 uv run pytest              # 离线测试（含前端 HTML/JS/路由一致性检查，不碰网络）

@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """构建可拷到别的 Apple Silicon Mac 上直接运行的独立版 vextract.app。
 
-与 build_macos_app.py（复用本机 .venv 的轻量启动器）不同，这个脚本：
+结构：
+- PyInstaller 只产出 onedir 的 `server/` 载荷（Python、依赖、前端、faster-whisper）；
+- 外层 `.app` 由 Swift/WKWebView 原生外壳承载：启动内置服务并把界面显示在
+  自己的窗口里，不跳浏览器；
+- 本机 Homebrew 的 ffmpeg/ffprobe 及动态库内联进 `server/_internal/ffmpeg`，
+  并改写为包内相对路径；
+- ad-hoc 签名后打成 zip / dmg。
 
-1. 在 build/standalone/venv 里用 uv.lock 装一份干净环境（base + faster-whisper，
-   不带 mlx/torch）；
-2. 用 PyInstaller 把 Python、依赖和前端资源冻进 .app；
-3. 把本机 Homebrew 的 ffmpeg/ffprobe 及其动态库复制进 app，并改写为包内相对路径；
-4. ad-hoc 签名后打成 zip。
-
-产物：build/standalone/dist/vextract.app 与 vextract-<version>-macos-arm64.zip
+产物（build/standalone/dist/）：
+  vextract.app
+  vextract-<version>-macos-arm64.zip
+  vextract-<version>-macos-arm64.dmg
 
 注意：随包的 Homebrew ffmpeg 是 GPL-3.0-or-later。这个独立包适合个人本机/私下拷贝，
 若要公开分发，应换成 LGPL 构建或改为要求系统自备 ffmpeg。
@@ -34,6 +37,7 @@ WORK = BUILD / "work"
 VENV = BUILD / "venv"
 APP_NAME = "vextract.app"
 BUNDLE_ID = "dev.a1ether.vextract"
+SWIFT_SOURCE = ROOT / "scripts" / "macos_launcher.swift"
 SYSTEM_PREFIXES = ("/usr/lib/", "/System/", "/Library/Apple/")
 
 
@@ -67,6 +71,26 @@ def make_icon() -> Path | None:
     if build_icon(resources):
         return resources / "AppIcon.icns"
     return None
+
+
+def find_swiftc() -> str:
+    swiftc = shutil.which("swiftc")
+    if swiftc:
+        return swiftc
+    xcrun = shutil.which("xcrun")
+    if xcrun:
+        try:
+            found = subprocess.run(
+                [xcrun, "--find", "swiftc"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        except subprocess.CalledProcessError:
+            found = ""
+        if found and Path(found).exists():
+            return found
+    raise SystemExit("找不到 swiftc：先安装 Xcode Command Line Tools（xcode-select --install）")
 
 
 def macho_dependencies(path: Path) -> list[str]:
@@ -107,13 +131,17 @@ def find_dependency(dep: str, current: Path, lib_dir: Path) -> Path | None:
     return None
 
 
-def bundle_ffmpeg(app: Path) -> None:
+def bundle_ffmpeg(target_root: Path) -> None:
+    """把 ffmpeg/ffprobe 和依赖库内联到 target_root/ffmpeg 下。
+
+    target_root 是 server/_internal；服务端 setup_path 会优先用这里的 bin。
+    """
     ffmpeg = shutil.which("ffmpeg")
     ffprobe = shutil.which("ffprobe")
     if not ffmpeg or not ffprobe:
         raise SystemExit("本机找不到 ffmpeg/ffprobe：先 brew install ffmpeg")
 
-    root = app / "Contents" / "Frameworks" / "ffmpeg"
+    root = target_root / "ffmpeg"
     bin_dir = root / "bin"
     lib_dir = root / "lib"
     bin_dir.mkdir(parents=True)
@@ -200,25 +228,74 @@ def bundle_ffmpeg(app: Path) -> None:
         print(f"  · {binary.name} OK：{result.stdout.splitlines()[0]}")
 
 
-def update_plist(app: Path, version: str) -> None:
-    path = app / "Contents" / "Info.plist"
-    with path.open("rb") as fh:
-        info = plistlib.load(fh)
-    info.update(
-        {
-            "CFBundleDisplayName": "vextract",
-            "CFBundleName": "vextract",
-            "CFBundleIdentifier": BUNDLE_ID,
-            "CFBundleShortVersionString": version,
-            "CFBundleVersion": version,
-            "LSMinimumSystemVersion": "13.0",
-            "LSApplicationCategoryType": "public.app-category.utilities",
-            "LSArchitecturePriority": ["arm64"],
-            "NSHighResolutionCapable": True,
-        }
-    )
-    with path.open("wb") as fh:
+def write_plist(app: Path, version: str) -> None:
+    info = {
+        "CFBundleDevelopmentRegion": "zh_CN",
+        "CFBundleDisplayName": "vextract",
+        "CFBundleExecutable": "vextract",
+        "CFBundleIconFile": "AppIcon",
+        "CFBundleIdentifier": BUNDLE_ID,
+        "CFBundleInfoDictionaryVersion": "6.0",
+        "CFBundleName": "vextract",
+        "CFBundlePackageType": "APPL",
+        "CFBundleShortVersionString": version,
+        "CFBundleVersion": version,
+        "LSApplicationCategoryType": "public.app-category.utilities",
+        "LSArchitecturePriority": ["arm64"],
+        "LSMinimumSystemVersion": "13.0",
+        "LSMultipleInstancesProhibited": True,
+        "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
+        "NSHighResolutionCapable": True,
+        "NSPrincipalClass": "NSApplication",
+    }
+    with (app / "Contents" / "Info.plist").open("wb") as fh:
         plistlib.dump(info, fh)
+
+
+def create_native_app(server_dir: Path, version: str, icon: Path | None) -> Path:
+    swiftc = find_swiftc()
+    app = DIST / APP_NAME
+    if app.exists():
+        shutil.rmtree(app)
+
+    contents = app / "Contents"
+    macos = contents / "MacOS"
+    resources = contents / "Resources"
+    macos.mkdir(parents=True)
+    resources.mkdir(parents=True)
+
+    print("== 复制服务载荷 ==")
+    shutil.copytree(server_dir, resources / "server", symlinks=True)
+    if icon:
+        shutil.copy2(icon, resources / "AppIcon.icns")
+
+    print("== 编译 Swift/WKWebView 外壳 ==")
+    executable = macos / "vextract"
+    run(
+        [
+            swiftc,
+            "-swift-version",
+            "5",
+            "-O",
+            "-target",
+            "arm64-apple-macos13.0",
+            "-framework",
+            "AppKit",
+            "-framework",
+            "WebKit",
+            str(SWIFT_SOURCE),
+            "-o",
+            str(executable),
+        ]
+    )
+    executable.chmod(0o755)
+
+    print("== 内联 ffmpeg ==")
+    bundle_ffmpeg(resources / "server" / "_internal")
+
+    write_plist(app, version)
+    sign_app(app)
+    return app
 
 
 def sign_app(app: Path) -> None:
@@ -264,11 +341,7 @@ def install(app: Path) -> Path:
 
 
 def clean_dist_app(app: Path) -> None:
-    """删掉 dist/ 里的原始 .app 和 PyInstaller 的 onedir，并注销 LaunchServices 条目。
-
-    BUNDLE 会生成 `vextract.app`，但 PyInstaller 同时留下 `dist/vextract/`；
-    两者都会被 LaunchServices 看到，正是"打开"对话框里出现两个同名图标的来源。
-    """
+    """删掉 dist/ 里的原始 .app 和 PyInstaller 的 server onedir，并注销 LaunchServices。"""
     lsregister = Path(
         "/System/Library/Frameworks/CoreServices.framework/Frameworks/"
         "LaunchServices.framework/Support/lsregister"
@@ -276,9 +349,10 @@ def clean_dist_app(app: Path) -> None:
     if lsregister.exists():
         subprocess.run([str(lsregister), "-u", str(app)], check=False, capture_output=True)
     shutil.rmtree(app, ignore_errors=True)
-    onedir = DIST / "vextract"
-    if onedir.exists():
-        shutil.rmtree(onedir, ignore_errors=True)
+    for name in ("server", "vextract"):
+        target = DIST / name
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
 
 
 def main() -> None:
@@ -289,7 +363,7 @@ def main() -> None:
     parser.add_argument(
         "--keep-app",
         action="store_true",
-        help="保留 dist/ 里的原始 .app（默认打包后删除，避免 LaunchServices 出现两份同名 app）",
+        help="保留 dist/ 里的原始 .app 与 server 载荷（默认打包后删除）",
     )
     args = parser.parse_args()
 
@@ -307,10 +381,6 @@ def main() -> None:
     if WORK.exists():
         shutil.rmtree(WORK)
 
-    env = os.environ.copy()
-    env["VEXTRACT_VERSION"] = version
-    if icon:
-        env["VEXTRACT_ICON"] = str(icon)
     run(
         [
             str(VENV / "bin" / "pyinstaller"),
@@ -321,24 +391,18 @@ def main() -> None:
             "--workpath",
             str(WORK),
             str(ROOT / "scripts" / "vextract.spec"),
-        ],
-        env=env,
+        ]
     )
 
-    app = DIST / APP_NAME
-    if not app.exists():
-        raise SystemExit(f"PyInstaller 没有产出 {app}")
-    print("== 内联 ffmpeg ==")
-    bundle_ffmpeg(app)
-    update_plist(app, version)
-    sign_app(app)
+    server_dir = DIST / "server"
+    if not server_dir.exists():
+        raise SystemExit(f"PyInstaller 没有产出 {server_dir}")
+    app = create_native_app(server_dir, version, icon)
 
     zip_path = None if args.no_zip else make_zip(app, version)
     dmg_path = None if args.no_dmg else make_dmg(app, version)
     target = None if args.no_install else install(app)
 
-    # dist/ 里的原始 .app 会被 LaunchServices 注册，和 ~/Applications 里那份形成两个同名图标。
-    # 有 zip/dmg/安装副本之后就不需要它了。
     cleaned = False
     if not args.keep_app and (zip_path or dmg_path or target):
         clean_dist_app(app)
@@ -355,7 +419,7 @@ def main() -> None:
     if target:
         print(f"  安装: {target}")
     if cleaned:
-        print("  已清理 dist/ 里的原始 .app（要保留请加 --keep-app）")
+        print("  已清理 dist/ 里的原始 .app 与 server 载荷（要保留请加 --keep-app）")
     print()
     print("拷到别的 Apple Silicon Mac 后，解压/挂载 DMG，把 vextract.app 拖进「应用程序」即可。")
     print("首次打开若被 Gatekeeper 拦：右键 → 打开，或 `xattr -dr com.apple.quarantine /Applications/vextract.app`。")

@@ -9,8 +9,6 @@ import os
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(SPEC)))
-VERSION = os.environ.get("VEXTRACT_VERSION", "0.3.0")
-ICON = os.environ.get("VEXTRACT_ICON") or None
 
 datas = [(os.path.join(ROOT, "src", "vextract", "web"), "vextract/web")]
 binaries = []
@@ -67,7 +65,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch="arm64",
@@ -75,29 +73,13 @@ exe = EXE(
     entitlements_file=None,
 )
 
+# 只产出 onedir 的 server 载荷；外层 .app 由 build_standalone_app.py 用
+# Swift/WKWebView 原生外壳创建，避免"app 跳浏览器"。
 coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
     strip=False,
     upx=False,
-    name="vextract",
-)
-
-app = BUNDLE(
-    coll,
-    name="vextract.app",
-    icon=ICON,
-    bundle_identifier="dev.a1ether.vextract",
-    version=VERSION,
-    info_plist={
-        "CFBundleDisplayName": "vextract",
-        "CFBundleName": "vextract",
-        "CFBundleShortVersionString": VERSION,
-        "CFBundleVersion": VERSION,
-        "LSMinimumSystemVersion": "13.0",
-        "LSApplicationCategoryType": "public.app-category.utilities",
-        "LSArchitecturePriority": ["arm64"],
-        "NSHighResolutionCapable": True,
-    },
+    name="server",
 )

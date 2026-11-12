@@ -178,17 +178,8 @@ uv run vx get "<链接>" --cookies-from-browser chrome
 
 ### macOS 应用（双击启动）
 
-**本机轻量版**（复用现有 `.venv`，体积 0.5MB，适合开发机）：
-
-```bash
-uv run python scripts/build_macos_app.py     # 打包并安装到 ~/Applications/vextract.app
-open ~/Applications/vextract.app             # 或直接在访达里双击
-```
-
-启动器复用项目现有的 `.venv`（本地转录等可选能力原样保留），所以 app 与项目目录绑定；
-移动项目后重新跑一次脚本即可。服务已在运行时再双击，只会把浏览器叫到界面，不会起第二个服务。
-
-**独立版**（可拷到别的 Apple Silicon Mac 直接跑，自带 Python、依赖、faster-whisper 与 ffmpeg）：
+**独立版（原生窗口，推荐）**：自带 Python、依赖、faster-whisper 与 ffmpeg，可拷到别的
+Apple Silicon Mac 直接跑。双击打开的是 **app 自己的窗口**（Swift + WKWebView），不跳浏览器。
 
 ```bash
 uv run python scripts/build_standalone_app.py
@@ -198,18 +189,28 @@ uv run python scripts/build_standalone_app.py
 #   ~/Applications/vextract.app                                 （本机安装）
 ```
 
-- 要求 macOS 13+ / Apple Silicon（arm64）；app 约 238MB，zip 约 96MB，DMG 约 111MB。
+- 构建需要 Xcode Command Line Tools（`swiftc`；`xcode-select --install`）。
+- 运行要求 macOS 13+ / Apple Silicon（arm64）；app 约 238MB，zip 约 96MB，DMG 约 109MB。
+- 关闭窗口或 Cmd+Q 会停止内置服务；「设置」页的「退出 vextract 服务」也会退出 app。
 - 首次使用本地转录时仍会联网下载模型权重（默认 `large-v3-turbo` 约 1.5GB）。
 - 随包的 ffmpeg 来自 Homebrew（GPL-3.0-or-later）。自己用/私下拷贝没问题；若公开分发，
   应换成 LGPL 构建，或改为要求系统自备 ffmpeg。
 - 未做 Apple 公证。拷到别的 Mac 首次打开若被 Gatekeeper 拦：右键 → 打开，或
   `xattr -dr com.apple.quarantine /Applications/vextract.app`。
 
-两种 app 的启动器打开界面后**立即退出**，服务在后台常驻：关掉浏览器不会停服务，
-再双击 app 只会重新打开界面，不会起第二个服务。日志在 `~/Library/Logs/vextract.log`。
+**本机轻量版（开发机使用）**：复用现有 `.venv`，体积 0.5MB；启动后打开系统浏览器，
+服务在后台常驻。适合改代码后快速打包，不适合拷到别的机器。
 
-停止服务：在「设置」页点「退出 vextract 服务」（服务端只接受本机请求）；浏览器已经关掉时，
-用「活动监视器」结束 `vextract` 进程即可。
+```bash
+uv run python scripts/build_macos_app.py     # 打包并安装到 ~/Applications/vextract.app
+open ~/Applications/vextract.app             # 或直接在访达里双击
+```
+
+服务已在运行时再双击，只会把浏览器叫到界面，不会起第二个服务；停止服务用「设置」页的
+「退出 vextract 服务」；浏览器已经关掉时，用「活动监视器」结束 `vextract` 进程。
+移动项目后重新跑一次脚本即可（app 与项目目录绑定）。
+
+两种 app 的日志都在 `~/Library/Logs/vextract.log`。
 
 ```bash
 uv run pytest              # 离线测试（含前端 HTML/JS/路由一致性检查，不碰网络）

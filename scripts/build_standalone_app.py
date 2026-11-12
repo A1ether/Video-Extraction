@@ -263,6 +263,24 @@ def install(app: Path) -> Path:
     return target
 
 
+def clean_dist_app(app: Path) -> None:
+    """删掉 dist/ 里的原始 .app 和 PyInstaller 的 onedir，并注销 LaunchServices 条目。
+
+    BUNDLE 会生成 `vextract.app`，但 PyInstaller 同时留下 `dist/vextract/`；
+    两者都会被 LaunchServices 看到，正是"打开"对话框里出现两个同名图标的来源。
+    """
+    lsregister = Path(
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/"
+        "LaunchServices.framework/Support/lsregister"
+    )
+    if lsregister.exists():
+        subprocess.run([str(lsregister), "-u", str(app)], check=False, capture_output=True)
+    shutil.rmtree(app, ignore_errors=True)
+    onedir = DIST / "vextract"
+    if onedir.exists():
+        shutil.rmtree(onedir, ignore_errors=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="构建独立版 vextract.app（Apple Silicon）")
     parser.add_argument("--no-install", action="store_true", help="只产出 dist/，不复制到 ~/Applications")
@@ -323,7 +341,7 @@ def main() -> None:
     # 有 zip/dmg/安装副本之后就不需要它了。
     cleaned = False
     if not args.keep_app and (zip_path or dmg_path or target):
-        shutil.rmtree(app)
+        clean_dist_app(app)
         cleaned = True
 
     print()

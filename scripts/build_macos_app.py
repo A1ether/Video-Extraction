@@ -78,20 +78,44 @@ if [ ! -x "$VX" ]; then
   exit 1
 fi
 
-# 已经有实例在跑（端口可能因占用自动后移）：不再起第二个，直接把界面叫出来。
+find_url() {{
+  j=0
+  while [ "$j" -lt {SCAN_PORTS} ]; do
+    p=$((PORT + j))
+    u="http://127.0.0.1:${{p}}/"
+    if curl -fsS --connect-timeout 0.2 --max-time 0.5 "${{u}}health" 2>/dev/null | grep -q '"yt_dlp"'; then
+      echo "$u"
+      return 0
+    fi
+    j=$((j + 1))
+  done
+  return 1
+}}
+
+# 已经有服务在跑（端口可能因占用自动后移）：不再起第二个，直接把界面叫出来。
+# 启动器本身不常驻——否则二次双击会被 LaunchServices 解释成 activate 旧进程，
+# 既没有窗口也不会开浏览器。
+if url=$(find_url); then
+  open "$url"
+  exit 0
+fi
+
+mkdir -p "$(dirname "$LOG")"
+nohup "$VX" serve --port "$PORT" --no-open >>"$LOG" 2>&1 &
+
 i=0
-while [ "$i" -lt {SCAN_PORTS} ]; do
-  p=$((PORT + i))
-  url="http://127.0.0.1:${{p}}/"
-  if curl -fsS --max-time 1 "${{url}}health" 2>/dev/null | grep -q '"yt_dlp"'; then
+while [ "$i" -lt 40 ]; do
+  if url=$(find_url); then
     open "$url"
     exit 0
   fi
+  sleep 0.5
   i=$((i + 1))
 done
 
-mkdir -p "$(dirname "$LOG")"
-exec "$VX" serve --port "$PORT" >>"$LOG" 2>&1
+ALERT='display alert "vextract 启动超时" message "服务未在 20 秒内启动，详见日志。" as critical'
+osascript -e "$ALERT" >/dev/null 2>&1 || true
+exit 1
 """
 
 

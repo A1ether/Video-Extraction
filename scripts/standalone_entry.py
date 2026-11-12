@@ -14,8 +14,10 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import signal
 import subprocess
 import sys
+import threading
 import time
 import traceback
 import urllib.request
@@ -45,14 +47,17 @@ def setup_log() -> TextIO:
 
 
 def setup_path() -> None:
-    """把随包的 ffmpeg/ffprobe 放到 PATH 最前面；没有则保持系统 PATH。"""
+    """把随包的 ffmpeg/ffprobe 放到 PATH 最前面，并保证系统目录一定在。"""
+    standard = "/usr/bin:/bin:/usr/sbin:/sbin"
+    existing = os.environ.get("PATH", "")
     for candidate in (
         bundle_root() / "ffmpeg" / "bin",
         bundle_root().parent / "Resources" / "ffmpeg" / "bin",
     ):
         if (candidate / "ffmpeg").exists():
-            os.environ["PATH"] = f"{candidate}{os.pathsep}{os.environ.get('PATH', '')}"
+            os.environ["PATH"] = f"{candidate}{os.pathsep}{standard}{os.pathsep}{existing}"
             return
+    os.environ["PATH"] = f"{standard}{os.pathsep}{existing}"
 
 
 def instance_url() -> str | None:
@@ -115,9 +120,30 @@ def serve() -> None:
     cli(args=args)
 
 
+def watch_parent() -> None:
+    """原生外壳被强退时，子进程会被 launchd 收养；发现 PPID 变化就退出。"""
+    parent = os.getppid()
+
+    def run() -> None:
+        while True:
+            time.sleep(2)
+            if os.getppid() != parent:
+                os.kill(os.getpid(), signal.SIGTERM)
+                return
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 def main() -> None:
     log = setup_log()
     setup_path()
+
+    # 原生 Swift/WKWebView 外壳：服务直接在前台跑，父进程负责窗口和退出。
+    if os.environ.get("VEXTRACT_NATIVE_SERVER") == "1":
+        watch_parent()
+        serve()
+        return
+
     is_server = os.environ.get(INTERNAL_SERVER) == "1"
     try:
         if is_server:
